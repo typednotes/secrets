@@ -18,6 +18,9 @@ Open-source projects (fully open client and/or server source) are
 - [HashiCorp Vault](tools/hashicorp-vault.md) — <u>open-source core</u>
   (MPL-2.0, BUSL for newer releases), infrastructure/secrets-management
   focus rather than end-user vault
+- [OpenBao](tools/openbao.md) — <u>open-source</u> (MPL-2.0), Linux
+  Foundation-governed fork of HashiCorp Vault created after Vault's
+  BUSL relicensing, infrastructure/secrets-management focus
 - [Dashlane](tools/dashlane.md) — closed-source, cloud SaaS
 - [LastPass](tools/lastpass.md) — closed-source, cloud SaaS
 - [NordPass](tools/nordpass.md) — closed-source, cloud SaaS
@@ -38,6 +41,7 @@ Open-source projects (fully open client and/or server source) are
 | pass | GPL-2.0 | git (any transport) | <u>Yes</u> | GPG (OpenPGP), git protocol |
 | Vaultwarden | GPL-3.0 | Self-hosted, Bitwarden clients | <u>Yes</u> | Same wire protocol as Bitwarden |
 | HashiCorp Vault | MPL-2.0 / BUSL | Self-hosted / HCP | <u>Core: yes</u> | HTTPS/REST, gRPC (Enterprise replication) |
+| OpenBao | MPL-2.0 | Self-hosted | <u>Yes</u> | HTTPS/REST (Vault-compatible), gRPC (replication) |
 | Dashlane | Proprietary | Dashlane Cloud | No | HTTPS/REST |
 | LastPass | Proprietary | LastPass Cloud | No | HTTPS/REST |
 | NordPass | Proprietary | NordPass Cloud | No | HTTPS/REST |
@@ -68,7 +72,7 @@ Nuance by tool:
 
 - **Bitwarden, Vaultwarden** — purely classical (PBKDF2/Argon2id + AES-256-CBC/HMAC; RSA-2048 only for organization key-sharing). No PQC roadmap has shipped in the client protocol as of this writing.
 - **KeePassXC, pass** — purely classical (AES/ChaCha20/Twofish; OpenPGP RSA/ECC for `pass`). OpenPGP has draft support for PQC algorithms (e.g. ML-KEM) in newer specs, but mainstream GnuPG/KeePassXC deployments do not use it by default.
-- **HashiCorp Vault** — purely classical (AES-256-GCM barrier, Shamir secret sharing which is information-theoretic and *not* threatened by quantum computers at all). No PQC key-wrapping/transit algorithms are in general availability.
+- **HashiCorp Vault, OpenBao** — purely classical (AES-256-GCM barrier, Shamir secret sharing which is information-theoretic and *not* threatened by quantum computers at all). No PQC key-wrapping/transit algorithms are in general availability in either project; as a fork sharing Vault's pre-fork cryptographic design, OpenBao's PQC status tracks Vault's exactly.
 - **Dashlane, LastPass, NordPass** — purely classical (AES-256/XChaCha20-Poly1305 with vendor-specific KDFs). No vendor has publicly announced production PQC for vault encryption.
 - **Proton Pass** — classical today (OpenPGP RSA/ECC + AES). Proton is the one vendor in this list that has publicly announced active post-quantum work (a PQC key-exchange rollout for parts of Proton Mail/VPN), so it is the most likely of these to add PQC to Pass first — but as of this writing that has not been confirmed shipped specifically for Pass's vault/sharing cryptography, so treat it as "watch this space," not "yes."
 - **Apple Keychain / iCloud Keychain** — Apple has shipped PQC (a hybrid Kyber/ML-KEM construction) in **iMessage** (PQ3) and is rolling similar hybrid PQC into **iCloud's end-to-end encryption** transport for some data categories, but this has not been confirmed to extend to iCloud Keychain's own sync protocol specifically as of this writing.

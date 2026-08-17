@@ -1,0 +1,22 @@
+[package]
+name = "secrets-engine-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secrets-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rand.workspace = true
+uuid.workspace = true
+hex.workspace = true
+tracing.workspace = true
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "chrono"] }
+
+[dev-dependencies]
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["postgres"] }

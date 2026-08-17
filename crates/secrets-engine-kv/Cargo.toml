@@ -1,0 +1,13 @@
+[package]
+name = "secrets-engine-kv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+secrets-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
