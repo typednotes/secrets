@@ -56,6 +56,9 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .and_then(|v| v.strip_prefix("Bearer "))
 }
 
+// Err is a ready-to-send Response (large), by design: callers just `?`
+// it straight back out of the handler.
+#[allow(clippy::result_large_err)]
 async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<(String, TokenEntry), Response> {
     let token = bearer_token(headers).ok_or_else(|| err(StatusCode::UNAUTHORIZED, "missing bearer token"))?;
     let entry = token::lookup_token(state.storage.as_ref(), token)
@@ -65,6 +68,7 @@ async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<(String, 
     Ok((token.to_string(), entry))
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_capability(
     state: &AppState,
     headers: &HeaderMap,
