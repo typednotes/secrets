@@ -1,11 +1,27 @@
 # secrets
 
+[![CI](https://github.com/typednotes/secrets/actions/workflows/ci.yml/badge.svg)](https://github.com/typednotes/secrets/actions/workflows/ci.yml)
+[![Docker image](https://img.shields.io/badge/ghcr.io-secrets--server-blue?logo=docker)](https://github.com/typednotes/secrets/pkgs/container/secrets-server)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 A small, modular secrets-management server in Rust — a much simpler
 reimplementation of the core ideas in [HashiCorp Vault](https://www.vaultproject.io/)
 and [OpenBao](https://github.com/openbao/openbao): encrypted secret storage
 gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
 
-## What's here (v1 scope)
+## Table of contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [HTTP API](#http-api)
+- [Testing](#testing)
+- [Project status and scope](#project-status-and-scope)
+- [Further reading](#further-reading)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Features
 
 - **Storage**: PostgreSQL only, behind a `StorageBackend` trait so another
   backend could be added later without touching anything above it.
@@ -65,11 +81,32 @@ tokens, or policy evaluation.
 | `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login |
 | `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root |
 
-## Running it
+## Quick start
 
 The server needs its own Postgres database (the "storage DB") to hold
 encrypted state — this is separate from any database(s) the PostgreSQL
 engine later manages credentials on.
+
+### Docker
+
+A public image is published to GitHub Container Registry on every push to
+`main` (tag `edge`) and on version tags (tags `X.Y.Z`, `X.Y`, `latest`) —
+see [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
+
+```bash
+docker run --rm -p 8200:8200 \
+  -e SECRETS_SERVER_STORAGE_DATABASE_URL=postgres://user:pass@host.docker.internal/secrets \
+  -e SECRETS_MASTER_KEY=$(openssl rand -hex 32) \
+  -e SECRETS_SERVER_BOOTSTRAP_USERNAME=admin \
+  -e SECRETS_SERVER_BOOTSTRAP_PASSWORD=change-me \
+  ghcr.io/typednotes/secrets-server:edge
+```
+
+The storage Postgres must be reachable from inside the container — use
+`host.docker.internal` to reach a Postgres running on your host, or run
+both containers on the same Docker network/compose project.
+
+### From source
 
 ```bash
 export SECRETS_SERVER_STORAGE_DATABASE_URL=postgres://user:pass@localhost/secrets
@@ -88,7 +125,7 @@ environment variables (prefixed `SECRETS_SERVER_`) take precedence. See
 config is validated at startup, so a typo'd `listen_addr` or a
 non-Postgres `storage_database_url` fails fast instead of surfacing later.
 
-## HTTP surface
+## HTTP API
 
 ```
 GET   /v1/sys/health
@@ -167,9 +204,41 @@ yet written — `secrets-storage-postgres` and `secrets-engine-postgres`
 already carry `testcontainers`/`testcontainers-modules` dev-dependencies
 for that purpose.
 
-## Explicitly out of scope for v1
+CI runs both `cargo test --workspace --lib` and
+`cargo clippy --workspace --all-targets -- -D warnings` on every pull
+request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-Namespaces, HA/replication (the lease reaper takes no distributed lock —
-a Postgres advisory lock is where that would go), an audit-log backend
-beyond structured logs, a web UI, other secrets engines (PKI, transit,
-...), other storage backends, and Shamir seal/unseal.
+## Project status and scope
+
+This is an early-stage, single-maintainer project — treat it as a
+learning/reference implementation, not production-hardened software yet.
+Explicitly out of scope for v1: namespaces, HA/replication (the lease
+reaper takes no distributed lock — a Postgres advisory lock is where that
+would go), an audit-log backend beyond structured logs, a web UI, other
+secrets engines (PKI, transit, ...), other storage backends, and Shamir
+seal/unseal.
+
+## Further reading
+
+Design rationale and comparisons to existing secret managers live in
+[`docs/`](docs/):
+
+- [Alternatives compared](docs/alternatives.md)
+- [Symmetric cryptography](docs/symmetric-cryptography.md), [asymmetric cryptography](docs/asymmetric-cryptography.md), [post-quantum cryptography](docs/post-quantum-cryptography.md)
+- [Hashing](docs/hashing.md), [key derivation](docs/key-derivation.md), [TLS](docs/tls.md)
+- [`docs/tools/`](docs/tools/) — notes on HashiCorp Vault, OpenBao, Bitwarden, 1Password-style tools, and others
+
+## Contributing
+
+Issues and PRs are welcome. Before opening a PR, run:
+
+```bash
+cargo test --workspace --lib
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+CI re-checks both on every pull request.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
