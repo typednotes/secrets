@@ -31,7 +31,7 @@ jobs:
         run: |
           for crate in secrets-core secrets-storage-postgres secrets-engine-kv secrets-engine-postgres secrets-auth-userpass secrets-auth-oidc; do
             version=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name == \"$crate\") | .version")
-            if curl -sf "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
+            if curl -sf -A "secrets-publish-ci (https://github.com/typednotes/secrets)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
               echo "$crate $version already published, skipping"
               continue
             fi
