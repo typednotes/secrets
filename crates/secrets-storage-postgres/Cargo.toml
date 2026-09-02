@@ -3,6 +3,10 @@ name = "secrets-storage-postgres"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "PostgreSQL-backed StorageBackend implementation for the secrets server."
+keywords = ["secrets", "postgresql", "storage", "vault"]
+categories = ["database"]
 
 [dependencies]
 secrets-core.workspace = true

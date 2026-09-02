@@ -14,14 +14,15 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+repository = "https://github.com/typednotes/secrets"
 
 [workspace.dependencies]
-secrets-core = { path = "crates/secrets-core" }
-secrets-storage-postgres = { path = "crates/secrets-storage-postgres" }
-secrets-engine-kv = { path = "crates/secrets-engine-kv" }
-secrets-engine-postgres = { path = "crates/secrets-engine-postgres" }
-secrets-auth-userpass = { path = "crates/secrets-auth-userpass" }
-secrets-auth-oidc = { path = "crates/secrets-auth-oidc" }
+secrets-core = { path = "crates/secrets-core", version = "0.1.0" }
+secrets-storage-postgres = { path = "crates/secrets-storage-postgres", version = "0.1.0" }
+secrets-engine-kv = { path = "crates/secrets-engine-kv", version = "0.1.0" }
+secrets-engine-postgres = { path = "crates/secrets-engine-postgres", version = "0.1.0" }
+secrets-auth-userpass = { path = "crates/secrets-auth-userpass", version = "0.1.0" }
+secrets-auth-oidc = { path = "crates/secrets-auth-oidc", version = "0.1.0" }
 
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"

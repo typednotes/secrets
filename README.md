@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/typednotes/secrets/actions/workflows/ci.yml/badge.svg)](https://github.com/typednotes/secrets/actions/workflows/ci.yml)
 [![Docker image](https://img.shields.io/badge/ghcr.io-secrets--server-blue?logo=docker)](https://github.com/typednotes/secrets/pkgs/container/secrets-server)
+[![crates.io](https://img.shields.io/crates/v/secrets-core.svg)](https://crates.io/crates/secrets-core)
+[![docs.rs](https://img.shields.io/docsrs/secrets-core)](https://docs.rs/secrets-core)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 A small, modular secrets-management server in Rust — a much simpler
@@ -71,15 +73,17 @@ methods get registered. Adding a new engine or auth method means
 implementing a trait and adding one line there — not touching routing,
 tokens, or policy evaluation.
 
-| Crate | Responsibility |
-|---|---|
-| `secrets-core` | Traits (`StorageBackend`, `SecretsEngine`, `AuthMethod`), token/policy/lease model, AEAD barrier, router, background reaper |
-| `secrets-storage-postgres` | `StorageBackend` impl backed by a single `kv_store` table |
-| `secrets-engine-kv` | Versioned, soft-deleting static secrets |
-| `secrets-engine-postgres` | Dynamic PostgreSQL credential generation/revocation |
-| `secrets-auth-userpass` | Argon2id username/password login |
-| `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login |
-| `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root |
+| Crate | Responsibility | docs.rs |
+|---|---|---|
+| `secrets-core` | Traits (`StorageBackend`, `SecretsEngine`, `AuthMethod`), token/policy/lease model, AEAD barrier, router, background reaper | [![docs.rs](https://img.shields.io/docsrs/secrets-core)](https://docs.rs/secrets-core) |
+| `secrets-storage-postgres` | `StorageBackend` impl backed by a single `kv_store` table | [![docs.rs](https://img.shields.io/docsrs/secrets-storage-postgres)](https://docs.rs/secrets-storage-postgres) |
+| `secrets-engine-kv` | Versioned, soft-deleting static secrets | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-kv)](https://docs.rs/secrets-engine-kv) |
+| `secrets-engine-postgres` | Dynamic PostgreSQL credential generation/revocation | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-postgres)](https://docs.rs/secrets-engine-postgres) |
+| `secrets-auth-userpass` | Argon2id username/password login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-userpass)](https://docs.rs/secrets-auth-userpass) |
+| `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-oidc)](https://docs.rs/secrets-auth-oidc) |
+| `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root | *(not published — see the [Docker image](#docker))* |
+
+The library crates above are published to [crates.io](https://crates.io/search?q=secrets-core), with docs auto-built on [docs.rs](https://docs.rs/secrets-core) on every release — see [`.github/workflows/crates-publish.yml`](.github/workflows/crates-publish.yml).
 
 ## Quick start
 

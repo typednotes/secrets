@@ -3,6 +3,10 @@ name = "secrets-auth-userpass"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Argon2id username/password auth method for the secrets server."
+keywords = ["secrets", "auth", "argon2", "vault"]
+categories = ["authentication"]
 
 [dependencies]
 secrets-core.workspace = true

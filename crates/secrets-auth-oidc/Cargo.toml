@@ -3,6 +3,10 @@ name = "secrets-auth-oidc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Interactive and machine-to-machine OIDC auth method for the secrets server."
+keywords = ["secrets", "oidc", "jwt", "vault"]
+categories = ["authentication"]
 
 [dependencies]
 secrets-core.workspace = true

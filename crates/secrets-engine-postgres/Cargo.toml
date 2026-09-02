@@ -3,6 +3,10 @@ name = "secrets-engine-postgres"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Dynamic PostgreSQL credential generation and revocation engine for the secrets server."
+keywords = ["secrets", "postgresql", "credentials", "vault"]
+categories = ["database"]
 
 [dependencies]
 secrets-core.workspace = true

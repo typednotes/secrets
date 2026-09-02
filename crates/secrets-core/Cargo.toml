@@ -3,6 +3,10 @@ name = "secrets-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Core traits and primitives for the secrets server: storage/engine/auth traits, tokens, policies, leases, and the AES-256-GCM encryption barrier."
+keywords = ["secrets", "vault", "encryption", "policy"]
+categories = ["cryptography", "authentication"]
 
 [dependencies]
 tokio.workspace = true

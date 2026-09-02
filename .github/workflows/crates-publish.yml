@@ -1,0 +1,33 @@
+name: Publish crates.io release
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check tag matches workspace version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "$tag_version" != "$cargo_version" ]; then
+            echo "Tag $GITHUB_REF_NAME (version $tag_version) does not match Cargo.toml workspace version $cargo_version" >&2
+            exit 1
+          fi
+
+      # secrets-core has no in-workspace dependencies; the other five all
+      # depend only on secrets-core, so it must land on crates.io first.
+      - name: Publish secrets-core
+        run: cargo publish -p secrets-core --locked
+
+      - name: Publish remaining library crates
+        run: |
+          for crate in secrets-storage-postgres secrets-engine-kv secrets-engine-postgres secrets-auth-userpass secrets-auth-oidc; do
+            cargo publish -p "$crate" --locked
+          done
