@@ -2,6 +2,7 @@ name: Publish crates.io release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -13,6 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Check tag matches workspace version
+        if: github.event_name == 'push'
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
           cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
@@ -23,11 +25,15 @@ jobs:
 
       # secrets-core has no in-workspace dependencies; the other five all
       # depend only on secrets-core, so it must land on crates.io first.
-      - name: Publish secrets-core
-        run: cargo publish -p secrets-core --locked
-
-      - name: Publish remaining library crates
+      # Each publish is skipped if that exact version is already live, so a
+      # retry after a partial failure (e.g. crates.io rate limiting) is safe.
+      - name: Publish library crates
         run: |
-          for crate in secrets-storage-postgres secrets-engine-kv secrets-engine-postgres secrets-auth-userpass secrets-auth-oidc; do
+          for crate in secrets-core secrets-storage-postgres secrets-engine-kv secrets-engine-postgres secrets-auth-userpass secrets-auth-oidc; do
+            version=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+            if curl -sf "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
+              echo "$crate $version already published, skipping"
+              continue
+            fi
             cargo publish -p "$crate" --locked
           done
