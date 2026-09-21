@@ -203,6 +203,36 @@ character-set safety, and OIDC claims-to-policy mapping / PKCE challenge
 generation — all against in-memory fakes, no live Postgres or IdP needed.
 `cargo clippy --workspace --all-targets` is clean.
 
+### Integration tests against a running server
+
+`crates/secrets-server/tests/integration.rs` drives the HTTP API of an
+already-running server — local or deployed — over the network. The target
+is given by environment variable:
+
+```bash
+SECRETS_TEST_URL=http://localhost:8200 \
+SECRETS_TEST_USERNAME=admin \
+SECRETS_TEST_PASSWORD=change-me \
+  cargo test -p secrets-server --test integration
+```
+
+Every test *skips* (rather than fails) when `SECRETS_TEST_URL` is unset, so
+plain `cargo test --workspace` stays offline; tests needing a token skip
+again without `SECRETS_TEST_USERNAME`/`SECRETS_TEST_PASSWORD`. Coverage:
+health, the unauthenticated surface (401/403 shapes, malformed bodies,
+unknown routes), token lifecycle (login/lookup/renew/revoke), the KV engine
+(round-trip, versioning, listing, unicode, concurrent writes), policy CRUD,
+and the database-engine/lease error paths.
+
+They are safe to point at a live deployment: each test namespaces its
+secrets under `secret/data/itest/<uuid>/` and its policies under
+`itest-<uuid>`, cleans up afterwards, and never touches the token it was
+not issued. The suite also goes easy on the server — `userpass` login is
+deliberately expensive (Argon2id), so one login is shared across tests and
+in-flight requests are capped at 4 (`SECRETS_TEST_CONCURRENCY`); without
+that, Cargo's default test parallelism is enough to starve a small
+single-instance deployment into timeouts.
+
 Integration tests against real Postgres (`testcontainers`-backed) are not
 yet written — `secrets-storage-postgres` and `secrets-engine-postgres`
 already carry `testcontainers`/`testcontainers-modules` dev-dependencies

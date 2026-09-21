@@ -2535,7 +2535,9 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "figment",
+ "reqwest",
  "secrets-auth-oidc",
  "secrets-auth-userpass",
  "secrets-core",
