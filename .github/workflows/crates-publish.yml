@@ -40,6 +40,40 @@ jobs:
           order=$(printf 'secrets-core\n%s\n' "$others")
           echo "Publishing in order:" $order
 
+          # crates.io throttles *new* crate names far harder than new versions
+          # of existing ones: a handful land and the rest are refused with 429
+          # until the bucket refills. The 1.0.0 release introduced eight new
+          # crates and stopped after five, so a release like that has to wait
+          # the limit out rather than fail. The error names the time to retry
+          # after, so honour it instead of guessing.
+          publish_with_retry() {
+            crate=$1
+            for attempt in $(seq 1 10); do
+              if out=$(cargo publish -p "$crate" --locked 2>&1); then
+                echo "$out"
+                return 0
+              fi
+              echo "$out"
+              case "$out" in
+                *"429 Too Many Requests"*) ;;
+                # Anything else is a real failure; retrying would just hide it.
+                *) return 1 ;;
+              esac
+
+              retry_at=$(printf '%s' "$out" \
+                | sed -n 's/.*Please try again after \(.*\) and see.*/\1/p' | head -1)
+              wait=120
+              if [ -n "$retry_at" ] && target=$(date -u -d "$retry_at" +%s 2>/dev/null); then
+                wait=$(( target - $(date -u +%s) + 5 ))
+                [ "$wait" -lt 5 ] && wait=5
+              fi
+              echo "::warning::$crate: crates.io rate limit hit, waiting ${wait}s (attempt $attempt/10)"
+              sleep "$wait"
+            done
+            echo "::error::$crate: still rate-limited after 10 attempts"
+            return 1
+          }
+
           # Read line by line rather than relying on unquoted word splitting,
           # so the loop does not depend on the shell's IFS behaviour.
           while read -r crate; do
@@ -51,5 +85,5 @@ jobs:
             fi
             # cargo waits for the new version to appear in the index before
             # returning, which is what lets the next crate depend on it.
-            cargo publish -p "$crate" --locked
+            publish_with_retry "$crate"
           done <<< "$order"
