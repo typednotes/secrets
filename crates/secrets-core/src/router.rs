@@ -20,6 +20,12 @@ impl Router {
         Self { mounts }
     }
 
+    /// Every registered mount, in registration order. Used to build the
+    /// server's `sys/help` index.
+    pub fn mounts(&self) -> &[EngineMount] {
+        &self.mounts
+    }
+
     /// Returns the matching mount and the path remainder relative to it.
     pub fn resolve<'a>(&self, path: &'a str) -> Option<(&EngineMount, &'a str)> {
         self.mounts

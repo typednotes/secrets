@@ -36,6 +36,19 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
   - `database/` — dynamic PostgreSQL credentials: configure a target
     database and a role's `CREATE`/`DROP` SQL templates, then mint a
     short-lived, uniquely-named credential on demand.
+  - **third-party delegation** — `github/`, `gitlab/`, `aws/`, `gcp/`,
+    `gworkspace/`, `dropbox/`, `m365/`: mint scoped, short-lived credentials
+    for a consuming microservice so it never holds a long-lived provider
+    secret. See [`docs/delegation/`](docs/delegation/README.md).
+  - `federation/` — the shape where nothing is stored at all: publishes the
+    OIDC token-exchange instructions a consumer needs to authenticate to AWS,
+    Google Cloud or Entra ID with its own workload identity.
+- **Self-documenting**: every engine answers `GET /v1/{mount}/help` with its
+  mechanism, TTL envelope, scoping, the root credential it needs and its
+  caveats — and every minted credential carries a `_doc` block saying what it
+  was scoped to and, crucially, whether revoking its lease actually destroys
+  it. Three of the seven providers cannot revoke an issued token, and the API
+  says so rather than implying a guarantee it cannot keep.
 - **Auth methods**:
   - `userpass` — Argon2id-hashed username/password.
   - `oidc` — both interactive human login (authorization-code + PKCE) and
@@ -79,6 +92,14 @@ tokens, or policy evaluation.
 | `secrets-storage-postgres` | `StorageBackend` impl backed by a single `kv_store` table | [![docs.rs](https://img.shields.io/docsrs/secrets-storage-postgres)](https://docs.rs/secrets-storage-postgres) |
 | `secrets-engine-kv` | Versioned, soft-deleting static secrets | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-kv)](https://docs.rs/secrets-engine-kv) |
 | `secrets-engine-postgres` | Dynamic PostgreSQL credential generation/revocation | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-postgres)](https://docs.rs/secrets-engine-postgres) |
+| `secrets-engine-github` | GitHub App installation tokens — repo-scoped, revocable | — |
+| `secrets-engine-gitlab` | GitLab project/group access tokens | — |
+| `secrets-engine-aws` | STS assumed-role sessions and per-lease IAM users | — |
+| `secrets-engine-gcp` | Service-account impersonation, downscoped tokens, HMAC keys | — |
+| `secrets-engine-gworkspace` | Brokered Google OAuth access tokens, domain-wide delegation | — |
+| `secrets-engine-dropbox` | Brokered Dropbox OAuth access tokens | — |
+| `secrets-engine-m365` | Microsoft Graph client-credentials and federated identity | — |
+| `secrets-engine-federation` | Publishes provider trust config — stores no credential | — |
 | `secrets-auth-userpass` | Argon2id username/password login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-userpass)](https://docs.rs/secrets-auth-userpass) |
 | `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-oidc)](https://docs.rs/secrets-auth-oidc) |
 | `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root | *(not published — see the [Docker image](#docker))* |
@@ -147,9 +168,12 @@ POST  /v1/auth/token/revoke-self
 GET/POST/DELETE /v1/secret/data/{path}  # KV engine
 GET   /v1/secret/metadata/{path}
 
-POST  /v1/database/config/{name}        # target DB connection (Sudo)
-POST  /v1/database/roles/{role}         # create/revoke SQL templates + TTL
-GET   /v1/database/creds/{role}         # generates a lease on demand
+GET   /v1/sys/help                      # every mounted engine and its shape
+GET   /v1/{mount}/help                  # one engine's own documentation
+
+GET/POST/DELETE /v1/{mount}/config/{target}   # provider + root credential (Sudo)
+GET/POST/DELETE /v1/{mount}/roles/{role}      # what a role may mint, and its TTL
+GET   /v1/{mount}/creds/{role}          # mint a credential + open a lease
 POST  /v1/sys/leases/revoke/{lease_id}
 
 GET/POST/DELETE /v1/sys/policy/{name}
@@ -157,7 +181,16 @@ GET/POST/DELETE /v1/sys/policy/{name}
 
 Every request other than `sys/health` and login is authenticated via
 `Authorization: Bearer <token>` and checked against the caller's policies
-before it reaches an engine.
+before it reaches an engine. The `help` endpoints are the one exception to
+capability checks: any authenticated caller may read them, so that a consumer
+holding only `read` on a single `creds` path can still discover what its
+credential is worth.
+
+`{mount}` is any engine — `database`, `github`, `gitlab`, `aws`, `gcp`,
+`gworkspace`, `dropbox`, `m365`, `federation` — so adding a provider adds no
+routes. `{mount}/config/{target}` is write-only: a `GET` reports whether it is
+configured but never returns the document, because it holds the root
+credential.
 
 ### Example: dynamic PostgreSQL credentials
 
@@ -193,7 +226,7 @@ above.
 ## Testing
 
 ```bash
-cargo test --workspace --lib
+cargo test --workspace --lib --bins
 ```
 
 Unit tests cover crypto round-trip/tamper-detection, policy evaluation,
@@ -201,7 +234,19 @@ KV versioning/soft-delete, the lease reaper (including cascade-revoke on
 token revocation), SQL-template substitution and username/password
 character-set safety, and OIDC claims-to-policy mapping / PKCE challenge
 generation — all against in-memory fakes, no live Postgres or IdP needed.
-`cargo clippy --workspace --all-targets` is clean.
+
+Each delegation engine additionally tests its own credential-shaping logic
+offline: GitHub App JWT claim bounds, GitLab's date-rollover and
+lease-beats-provider-expiry rule, AWS IAM user-name generation and the
+per-credential shape override, GCP access-boundary construction, the
+Microsoft client-assertion variants, and the federation instruction builder.
+
+The server's own tests assert the **self-documentation contract**: that the
+route table has no conflicts, that every mounted engine describes itself, and
+that no engine claims more revocability than its shape allows — so a `_doc`
+block cannot quietly start lying.
+
+`cargo clippy --workspace --all-targets -- -D warnings` is clean.
 
 ### Integration tests against a running server
 
@@ -238,7 +283,7 @@ yet written — `secrets-storage-postgres` and `secrets-engine-postgres`
 already carry `testcontainers`/`testcontainers-modules` dev-dependencies
 for that purpose.
 
-CI runs both `cargo test --workspace --lib` and
+CI runs both `cargo test --workspace --lib --bins` and
 `cargo clippy --workspace --all-targets -- -D warnings` on every pull
 request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
@@ -258,6 +303,12 @@ Design rationale and comparisons to existing secret managers live in
 [`docs/`](docs/):
 
 - [Alternatives compared](docs/alternatives.md)
+- [**Delegating third-party access**](docs/delegation/README.md) — how a
+  microservice gets GitHub, GitLab, AWS, GCS, Google Workspace, Dropbox or
+  Microsoft 365 access without holding a long-lived credential, with a guide
+  per provider, plus [**federation**](docs/delegation/federation.md) (the shape
+  that stores nothing) and [**setup runbooks**](docs/delegation/setup/README.md)
+  for every engine
 - [Symmetric cryptography](docs/symmetric-cryptography.md), [asymmetric cryptography](docs/asymmetric-cryptography.md), [post-quantum cryptography](docs/post-quantum-cryptography.md)
 - [Hashing](docs/hashing.md), [key derivation](docs/key-derivation.md), [TLS](docs/tls.md)
 - [`docs/tools/`](docs/tools/) — notes on HashiCorp Vault, OpenBao, Bitwarden, 1Password-style tools, and others
@@ -267,7 +318,7 @@ Design rationale and comparisons to existing secret managers live in
 Issues and PRs are welcome. Before opening a PR, run:
 
 ```bash
-cargo test --workspace --lib
+cargo test --workspace --lib --bins
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 

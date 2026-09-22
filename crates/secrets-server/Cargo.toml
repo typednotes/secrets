@@ -13,6 +13,14 @@ secrets-core.workspace = true
 secrets-storage-postgres.workspace = true
 secrets-engine-kv.workspace = true
 secrets-engine-postgres.workspace = true
+secrets-engine-github.workspace = true
+secrets-engine-gitlab.workspace = true
+secrets-engine-aws.workspace = true
+secrets-engine-gcp.workspace = true
+secrets-engine-gworkspace.workspace = true
+secrets-engine-dropbox.workspace = true
+secrets-engine-m365.workspace = true
+secrets-engine-federation.workspace = true
 secrets-auth-userpass.workspace = true
 secrets-auth-oidc.workspace = true
 tokio.workspace = true
@@ -27,5 +35,6 @@ tower-http = { version = "0.7", features = ["trace"] }
 figment = { version = "0.10", features = ["env", "toml"] }
 
 [dev-dependencies]
+async-trait.workspace = true
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 chrono.workspace = true

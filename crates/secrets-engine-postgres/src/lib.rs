@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chrono::Utc;
 use rand::RngExt;
-use secrets_core::engine::{EngineError, EngineResult, SecretsEngine};
+use secrets_core::engine::{
+    CredentialShape, EngineDoc, EngineError, EngineResult, GeneratedCredential, PathDoc,
+    SecretsEngine, TtlDoc,
+};
 use secrets_core::lease::Lease;
 use secrets_core::storage::{StorageBackend, StorageEntry};
 use serde::{Deserialize, Serialize};
@@ -146,6 +149,65 @@ fn render_template(template: &str, username: &str, password: &str) -> String {
 
 #[async_trait]
 impl SecretsEngine for PostgresEngine {
+    fn doc(&self) -> EngineDoc {
+        EngineDoc {
+            provider: "PostgreSQL".to_string(),
+            mechanism: "per-lease database role created with the role's CREATE \
+                        templates and dropped with its revocation templates"
+                .to_string(),
+            shape: CredentialShape::MintAndRevoke,
+            revocable: true,
+            revoke_effect: "runs the role's revocation_statements — normally \
+                            DROP ROLE — so the credential stops working \
+                            immediately and existing sessions are terminated."
+                .to_string(),
+            ttl: TtlDoc {
+                min_seconds: Some(1),
+                max_seconds: None,
+                fixed: false,
+                note: "set per role by default_ttl_seconds. PostgreSQL imposes no \
+                       limit of its own — the reaper is the only clock, so a \
+                       missed revocation leaves the role in place."
+                    .to_string(),
+            },
+            scoping: "whatever the role's creation_statements GRANT. Scope is \
+                      entirely in the operator's SQL, so grant narrowly."
+                .to_string(),
+            root_credential: "a privileged connection string per target database, \
+                              held at database/config/{name}. It can create and drop \
+                              roles, so treat it as the blast radius of this mount."
+                .to_string(),
+            paths: vec![
+                PathDoc::new(
+                    "database/config/{name}",
+                    &["POST"],
+                    "sudo",
+                    "register a target database's privileged connection URL",
+                ),
+                PathDoc::new(
+                    "database/roles/{role}",
+                    &["POST"],
+                    "create",
+                    "define the CREATE/DROP SQL templates and TTL for a role",
+                ),
+                PathDoc::new(
+                    "database/creds/{role}",
+                    &["GET"],
+                    "read",
+                    "mint a credential for that role and open a lease",
+                ),
+            ],
+            docs_url: Some("README.md#example-dynamic-postgresql-credentials".to_string()),
+            caveats: vec![
+                "Generated usernames are restricted to [a-z0-9_] and passwords to hex, \
+                 so template substitution cannot break out of the quotes in your SQL."
+                    .to_string(),
+                "The reaper takes no distributed lock, so run one node."
+                    .to_string(),
+            ],
+        }
+    }
+
     async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
         if let Some(name) = path.strip_prefix("roles/") {
             let role = Self::load_role(storage, name).await?.ok_or(EngineError::NotFound)?;
@@ -209,7 +271,7 @@ impl SecretsEngine for PostgresEngine {
         &self,
         storage: &dyn StorageBackend,
         role_name: &str,
-    ) -> EngineResult<(serde_json::Value, Lease)> {
+    ) -> EngineResult<GeneratedCredential> {
         let role = Self::load_role(storage, role_name).await?.ok_or(EngineError::NotFound)?;
         let pool = self.pool_for(storage, &role.db_name).await?;
 
@@ -240,7 +302,15 @@ impl SecretsEngine for PostgresEngine {
             expires_at: now + chrono::Duration::seconds(role.default_ttl_seconds),
         };
 
-        Ok((json!({ "username": username, "password": password }), lease))
+        Ok(GeneratedCredential::new(
+            json!({ "username": username, "password": password }),
+            lease,
+            vec![
+                format!("database:{}", role.db_name),
+                format!("role:{role_name}"),
+                format!("user:{username}"),
+            ],
+        ))
     }
 
     async fn revoke(&self, storage: &dyn StorageBackend, lease: &Lease) -> EngineResult<()> {

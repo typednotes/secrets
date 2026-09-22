@@ -1,0 +1,23 @@
+[package]
+name = "secrets-engine-dropbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dropbox credential engine for the secrets server: brokered short-lived OAuth access tokens."
+keywords = ["secrets", "dropbox", "oauth", "vault"]
+categories = ["authentication"]
+
+[dependencies]
+secrets-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

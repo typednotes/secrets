@@ -1,0 +1,23 @@
+[package]
+name = "secrets-engine-gworkspace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Google Workspace credential engine for the secrets server: brokered OAuth access tokens and domain-wide delegation."
+keywords = ["secrets", "google", "drive", "oauth"]
+categories = ["authentication"]
+
+[dependencies]
+secrets-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

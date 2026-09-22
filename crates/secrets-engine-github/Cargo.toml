@@ -1,0 +1,23 @@
+[package]
+name = "secrets-engine-github"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GitHub App installation token engine for the secrets server: short-lived, repo-scoped, revocable credentials."
+keywords = ["secrets", "github", "vault", "credentials"]
+categories = ["authentication"]
+
+[dependencies]
+secrets-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

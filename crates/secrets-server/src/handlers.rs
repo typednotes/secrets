@@ -7,7 +7,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router as AxumRouter};
 use secrets_auth_oidc::OidcConfig;
 use secrets_core::auth::{AuthError, AuthMethod, LoginRequest};
-use secrets_core::engine::EngineError;
+use secrets_core::engine::{EngineError, GeneratedCredential};
 use secrets_core::lease;
 use secrets_core::policy::{self, Capability, Policy};
 use secrets_core::token::{self, TokenEntry};
@@ -37,10 +37,23 @@ pub fn router(state: Arc<AppState>) -> AxumRouter {
             get(secret_read).post(secret_write).delete(secret_delete),
         )
         .route("/v1/secret/metadata/{*path}", get(secret_list))
-        .route("/v1/database/config/{name}", post(database_config_write))
-        .route("/v1/database/roles/{role}", post(database_role_write))
-        .route("/v1/database/creds/{role}", get(database_generate_creds))
         .route("/v1/sys/leases/revoke/{lease_id}", post(revoke_lease_handler))
+        // Self-documentation. Generic over the mount so every engine — the
+        // ones here today and the ones added later — is discoverable and
+        // describable without touching this file again.
+        .route("/v1/sys/help", get(sys_help))
+        .route("/v1/{mount}/help", get(engine_help))
+        .route(
+            "/v1/{mount}/config/{name}",
+            get(engine_config_read)
+                .post(engine_config_write)
+                .delete(engine_config_delete),
+        )
+        .route(
+            "/v1/{mount}/roles/{role}",
+            get(engine_role_read).post(engine_role_write).delete(engine_role_delete),
+        )
+        .route("/v1/{mount}/creds/{role}", get(engine_generate_creds))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -302,13 +315,25 @@ async fn delete_policy(
     }
 }
 
-fn engine_error_response(e: EngineError) -> Response {
-    match e {
-        EngineError::NotFound => err(StatusCode::NOT_FOUND, "not found"),
-        EngineError::Unsupported => err(StatusCode::BAD_REQUEST, "operation not supported"),
-        EngineError::InvalidRequest(msg) => err(StatusCode::BAD_REQUEST, msg),
-        e => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
+/// Engine errors carry a pointer to the engine's own documentation, so a
+/// caller who gets "operation not supported" can find out what this mount
+/// *does* support without reading our source.
+fn engine_error_response(e: EngineError, mount: &str) -> Response {
+    let (status, message) = match e {
+        EngineError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+        EngineError::Unsupported => (
+            StatusCode::BAD_REQUEST,
+            "operation not supported by this engine".to_string(),
+        ),
+        EngineError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+        EngineError::Provider(msg) => (StatusCode::BAD_GATEWAY, msg),
+        e => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    (
+        status,
+        Json(json!({ "error": message, "hint": format!("GET /v1/{mount}/help") })),
+    )
+        .into_response()
 }
 
 fn auth_error_response(e: AuthError) -> Response {
@@ -333,7 +358,7 @@ async fn secret_read(
     };
     match mount.engine.read(state.storage.as_ref(), remainder).await {
         Ok(value) => Json(value).into_response(),
-        Err(e) => engine_error_response(e),
+        Err(e) => engine_error_response(e, "secret"),
     }
 }
 
@@ -352,7 +377,7 @@ async fn secret_write(
     };
     match mount.engine.write(state.storage.as_ref(), remainder, data).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => engine_error_response(e),
+        Err(e) => engine_error_response(e, "secret"),
     }
 }
 
@@ -370,7 +395,7 @@ async fn secret_delete(
     };
     match mount.engine.delete(state.storage.as_ref(), remainder).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => engine_error_response(e),
+        Err(e) => engine_error_response(e, "secret"),
     }
 }
 
@@ -388,74 +413,283 @@ async fn secret_list(
     };
     match mount.engine.list(state.storage.as_ref(), remainder).await {
         Ok(keys) => Json(json!({ "keys": keys })).into_response(),
-        Err(e) => engine_error_response(e),
+        Err(e) => engine_error_response(e, "secret"),
     }
 }
 
-async fn database_config_write(
+/// Documentation is not a secret, so any authenticated caller may read it.
+/// A consumer holding only `read` on one `creds` path can therefore still
+/// discover what its credential is worth and what revoking it would do.
+async fn engine_help(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(name): Path<String>,
-    Json(data): Json<serde_json::Value>,
+    Path(mount): Path<String>,
 ) -> Response {
-    let full_path = format!("database/config/{name}");
-    if let Err(resp) = require_capability(&state, &headers, &full_path, Capability::Sudo).await {
+    if let Err(resp) = authenticate(&state, &headers).await {
         return resp;
     }
-    let Some((mount, remainder)) = state.router.resolve(&full_path) else {
-        return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
+    let Some((engine_mount, _)) = state.router.resolve(&format!("{mount}/help")) else {
+        return err(StatusCode::NOT_FOUND, format!("no engine mounted at '{mount}/'"));
     };
-    match mount.engine.write(state.storage.as_ref(), remainder, data).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => engine_error_response(e),
+    let doc = engine_mount.engine.doc();
+    let mut value = serde_json::to_value(&doc).unwrap_or_else(|_| json!({}));
+    if let Some(object) = value.as_object_mut() {
+        object.insert("mount".to_string(), json!(mount));
+        object.insert(
+            "lease_semantics".to_string(),
+            json!(if doc.revocable {
+                "Revoking a lease destroys the credential at the provider."
+            } else {
+                "Revoking a lease only deletes our record of it. The credential \
+                 keeps working until it expires — keep TTLs short."
+            }),
+        );
     }
+    Json(value).into_response()
 }
 
-async fn database_role_write(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path(role): Path<String>,
-    Json(data): Json<serde_json::Value>,
-) -> Response {
-    let full_path = format!("database/roles/{role}");
-    if let Err(resp) = require_capability(&state, &headers, &full_path, Capability::Create).await {
+/// The index: every mounted engine, what shape it is, and where its own
+/// documentation lives — plus what the five shapes mean, so the API explains
+/// its own vocabulary.
+async fn sys_help(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Err(resp) = authenticate(&state, &headers).await {
         return resp;
     }
-    let Some((mount, remainder)) = state.router.resolve(&full_path) else {
+
+    let mut by_mount = std::collections::BTreeMap::new();
+    for mount in state.router.mounts() {
+        let root = mount.prefix.split('/').next().unwrap_or(&mount.prefix).to_string();
+        by_mount.entry(root).or_insert_with(|| mount.engine.doc());
+    }
+
+    let engines: Vec<serde_json::Value> = by_mount
+        .iter()
+        .map(|(mount, doc)| {
+            json!({
+                "mount": mount,
+                "provider": doc.provider,
+                "mechanism": doc.mechanism,
+                "shape": doc.shape,
+                "revocable": doc.revocable,
+                "help": format!("/v1/{mount}/help"),
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "engines": engines,
+        "shapes": {
+            "mint-and-revoke": "Minted on demand and destroyed on demand. A lease means what it says.",
+            "mint-expiry-only": "Minted on demand, but the provider cannot un-mint it. TTL is the only containment.",
+            "refresh-broker": "The durable secret stays here; only a short-lived access token is handed out.",
+            "static-custody": "Nothing is mintable — encrypted custody plus rotation.",
+            "federation": "No credential exists anywhere; the consumer's own identity is trusted by the provider.",
+        },
+        "conventions": {
+            "{mount}/config/{name}": "operator: the provider connection and root credential (sudo)",
+            "{mount}/roles/{role}": "operator: what a role may mint, and its TTL (create)",
+            "{mount}/creds/{role}": "consumer: mint a credential and open a lease (read)",
+            "{mount}/help": "anyone authenticated: this engine's documentation",
+        },
+        "further_reading": "docs/delegation/README.md",
+    }))
+    .into_response()
+}
+
+/// `{mount}/config/{name}` and `{mount}/roles/{role}` are the operator
+/// surface, shared by every engine. `config` holds root credentials, so it is
+/// `sudo`; role definitions are `create`.
+async fn engine_write_at(
+    state: &AppState,
+    headers: &HeaderMap,
+    mount: &str,
+    suffix: &str,
+    capability: Capability,
+    data: serde_json::Value,
+) -> Response {
+    let full_path = format!("{mount}/{suffix}");
+    if let Err(resp) = require_capability(state, headers, &full_path, capability).await {
+        return resp;
+    }
+    let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    match mount.engine.write(state.storage.as_ref(), remainder, data).await {
+    match engine_mount.engine.write(state.storage.as_ref(), remainder, data).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => engine_error_response(e),
+        Err(e) => engine_error_response(e, mount),
     }
 }
 
-async fn database_generate_creds(
+async fn engine_read_at(
+    state: &AppState,
+    headers: &HeaderMap,
+    mount: &str,
+    suffix: &str,
+    capability: Capability,
+) -> Response {
+    let full_path = format!("{mount}/{suffix}");
+    if let Err(resp) = require_capability(state, headers, &full_path, capability).await {
+        return resp;
+    }
+    let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
+        return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
+    };
+    match engine_mount.engine.read(state.storage.as_ref(), remainder).await {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => engine_error_response(e, mount),
+    }
+}
+
+async fn engine_delete_at(
+    state: &AppState,
+    headers: &HeaderMap,
+    mount: &str,
+    suffix: &str,
+) -> Response {
+    let full_path = format!("{mount}/{suffix}");
+    if let Err(resp) = require_capability(state, headers, &full_path, Capability::Sudo).await {
+        return resp;
+    }
+    let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
+        return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
+    };
+    match engine_mount.engine.delete(state.storage.as_ref(), remainder).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => engine_error_response(e, mount),
+    }
+}
+
+async fn engine_config_write(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Path(role): Path<String>,
+    Path((mount, name)): Path<(String, String)>,
+    Json(data): Json<serde_json::Value>,
 ) -> Response {
-    let full_path = format!("database/creds/{role}");
+    engine_write_at(
+        &state,
+        &headers,
+        &mount,
+        &format!("config/{name}"),
+        Capability::Sudo,
+        data,
+    )
+    .await
+}
+
+async fn engine_config_read(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, name)): Path<(String, String)>,
+) -> Response {
+    engine_read_at(
+        &state,
+        &headers,
+        &mount,
+        &format!("config/{name}"),
+        Capability::Sudo,
+    )
+    .await
+}
+
+async fn engine_config_delete(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, name)): Path<(String, String)>,
+) -> Response {
+    engine_delete_at(&state, &headers, &mount, &format!("config/{name}")).await
+}
+
+async fn engine_role_write(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, role)): Path<(String, String)>,
+    Json(data): Json<serde_json::Value>,
+) -> Response {
+    engine_write_at(
+        &state,
+        &headers,
+        &mount,
+        &format!("roles/{role}"),
+        Capability::Create,
+        data,
+    )
+    .await
+}
+
+async fn engine_role_read(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, role)): Path<(String, String)>,
+) -> Response {
+    engine_read_at(
+        &state,
+        &headers,
+        &mount,
+        &format!("roles/{role}"),
+        Capability::Read,
+    )
+    .await
+}
+
+async fn engine_role_delete(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, role)): Path<(String, String)>,
+) -> Response {
+    engine_delete_at(&state, &headers, &mount, &format!("roles/{role}")).await
+}
+
+/// The consumer-facing route: mint a credential, open a lease, and tell the
+/// caller in the same breath what that credential is worth.
+async fn engine_generate_creds(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((mount, role)): Path<(String, String)>,
+) -> Response {
+    let full_path = format!("{mount}/creds/{role}");
     let entry = match require_capability(&state, &headers, &full_path, Capability::Read).await {
         Ok(entry) => entry,
         Err(resp) => return resp,
     };
-    let Some((mount, remainder)) = state.router.resolve(&full_path) else {
+    let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    let (data, mut new_lease) = match mount.engine.generate(state.storage.as_ref(), remainder).await {
-        Ok(result) => result,
-        Err(e) => return engine_error_response(e),
+
+    let GeneratedCredential {
+        data,
+        mut lease,
+        scoped_to,
+        shape,
+        revoke_effect,
+    } = match engine_mount.engine.generate(state.storage.as_ref(), remainder).await {
+        Ok(generated) => generated,
+        Err(e) => return engine_error_response(e, &mount),
     };
-    new_lease.token_id_hash = entry.id_hash;
-    if let Err(e) = lease::store_lease(state.storage.as_ref(), &new_lease).await {
+
+    lease.token_id_hash = entry.id_hash;
+    if let Err(e) = lease::store_lease(state.storage.as_ref(), &lease).await {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
     }
 
+    let doc = engine_mount.engine.doc();
+    // A credential may declare guarantees that differ from its engine's
+    // headline shape, and the caller must be told the truth about the thing it
+    // actually received.
+    let shape = shape.unwrap_or(doc.shape);
     Json(json!({
-        "lease_id": new_lease.id,
+        "lease_id": lease.id,
         "data": data,
-        "lease_duration": (new_lease.expires_at - new_lease.issued_at).num_seconds(),
+        "lease_duration": (lease.expires_at - lease.issued_at).num_seconds(),
+        "_doc": {
+            "shape": shape,
+            "revocable": shape.revocable(),
+            "revoke_effect": revoke_effect.unwrap_or(doc.revoke_effect),
+            "scoped_to": scoped_to,
+            "expires_at": lease.expires_at,
+            "ttl": doc.ttl,
+            "help": format!("/v1/{mount}/help"),
+            "revoke": format!("/v1/sys/leases/revoke/{}", lease.id),
+        },
     }))
     .into_response()
 }
@@ -480,5 +714,217 @@ async fn revoke_lease_handler(
     match secrets_core::reaper::revoke_lease(state.storage.as_ref(), &state.router, &target_lease).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use secrets_core::router::Router;
+    use secrets_core::storage::{StorageBackend, StorageEntry, StorageResult};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemStorage(Mutex<HashMap<String, StorageEntry>>);
+
+    #[async_trait]
+    impl StorageBackend for MemStorage {
+        async fn get(&self, path: &str) -> StorageResult<Option<StorageEntry>> {
+            Ok(self.0.lock().unwrap().get(path).cloned())
+        }
+        async fn put(&self, path: &str, entry: StorageEntry) -> StorageResult<()> {
+            self.0.lock().unwrap().insert(path.to_string(), entry);
+            Ok(())
+        }
+        async fn delete(&self, path: &str) -> StorageResult<()> {
+            self.0.lock().unwrap().remove(path);
+            Ok(())
+        }
+        async fn list(&self, prefix: &str) -> StorageResult<Vec<String>> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
+        }
+    }
+
+    fn test_state() -> Arc<AppState> {
+        Arc::new(AppState {
+            storage: Arc::new(MemStorage::default()),
+            // The real mount table, so these assertions cover every engine
+            // this server actually exposes.
+            router: Arc::new(Router::new(crate::wiring::engine_mounts())),
+            userpass: secrets_auth_userpass::UserPassAuth::new(),
+            oidc: secrets_auth_oidc::OidcAuthMethod::new(),
+        })
+    }
+
+    /// axum panics when two routes conflict. The generic `/v1/{mount}/…` routes
+    /// sit alongside static ones like `/v1/sys/policy/{name}`, so building the
+    /// table is worth asserting rather than discovering at startup.
+    #[test]
+    fn route_table_has_no_conflicts() {
+        let _ = router(test_state());
+    }
+
+    /// Every engine must be able to describe itself — the `_doc` block and the
+    /// help endpoints are only as honest as this.
+    #[test]
+    fn mounted_engines_document_themselves() {
+        let state = test_state();
+        assert!(
+            state.router.mounts().len() >= 10,
+            "expected the full engine set to be mounted"
+        );
+        for mount in state.router.mounts() {
+            let doc = mount.engine.doc();
+            let at = &mount.prefix;
+            assert!(!doc.provider.is_empty(), "{at} has no provider");
+            assert!(!doc.mechanism.is_empty(), "{at} has no mechanism");
+            assert!(!doc.scoping.is_empty(), "{at} does not describe its scoping");
+            assert!(
+                !doc.root_credential.is_empty(),
+                "{at} does not say what secret the server must hold"
+            );
+            assert!(
+                !doc.revoke_effect.is_empty(),
+                "{at} does not say what revoke does"
+            );
+            // The whole point of the `_doc` block is that a caller can trust
+            // it. An engine claiming more revocability than its shape allows
+            // would mislead every consumer that reads it.
+            assert_eq!(
+                doc.revocable,
+                doc.shape.revocable(),
+                "{at} disagrees with its own shape about revocability"
+            );
+            assert!(!doc.paths.is_empty(), "{at} documents no paths");
+        }
+    }
+
+    async fn body_json(response: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("response body");
+        serde_json::from_slice(&bytes).expect("response is JSON")
+    }
+
+    /// Mints a real token in the in-memory store so the help handlers, which
+    /// require authentication but no capability, can be exercised end to end.
+    async fn authenticated(state: &AppState) -> HeaderMap {
+        let (raw, entry) = token::generate_token(vec!["root".to_string()], Some(3600));
+        token::store_token(state.storage.as_ref(), &raw, &entry)
+            .await
+            .expect("store token");
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", format!("Bearer {raw}").parse().unwrap());
+        headers
+    }
+
+    #[tokio::test]
+    async fn sys_help_indexes_every_engine_and_explains_the_shapes() {
+        let state = test_state();
+        let headers = authenticated(&state).await;
+        let body = body_json(sys_help(State(state.clone()), headers).await).await;
+
+        let mounts: Vec<&str> = body["engines"]
+            .as_array()
+            .expect("engines")
+            .iter()
+            .filter_map(|e| e["mount"].as_str())
+            .collect();
+        for expected in [
+            "aws", "database", "dropbox", "federation", "gcp", "github", "gitlab",
+            "gworkspace", "m365", "secret",
+        ] {
+            assert!(mounts.contains(&expected), "{expected} missing from {mounts:?}");
+        }
+        // The API explains its own vocabulary, so a caller never has to guess
+        // what "mint-expiry-only" is promising.
+        assert!(body["shapes"]["mint-expiry-only"].is_string());
+        assert!(body["conventions"]["{mount}/creds/{role}"].is_string());
+    }
+
+    #[tokio::test]
+    async fn help_requires_a_token_but_no_capability() {
+        let state = test_state();
+        let anonymous = sys_help(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+        // The token carries a policy name that does not exist, so it has no
+        // capabilities at all — and must still be able to read the docs.
+        let headers = authenticated(&state).await;
+        let response = engine_help(
+            State(state.clone()),
+            headers,
+            Path("github".to_string()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body["mount"], "github");
+        assert_eq!(body["shape"], "mint-and-revoke");
+        assert!(body["revoke_effect"].as_str().unwrap().contains("installation/token"));
+        assert!(body["lease_semantics"].as_str().unwrap().contains("destroys"));
+    }
+
+    /// The engines that cannot revoke must say so at the point a caller looks,
+    /// not only in the prose documentation.
+    #[tokio::test]
+    async fn help_admits_when_a_lease_cannot_be_honoured() {
+        let state = test_state();
+        for mount in ["aws", "gcp", "m365"] {
+            let headers = authenticated(&state).await;
+            let body = body_json(
+                engine_help(State(state.clone()), headers, Path(mount.to_string())).await,
+            )
+            .await;
+            assert_eq!(body["revocable"], false, "{mount} claims to be revocable");
+            assert!(
+                body["lease_semantics"]
+                    .as_str()
+                    .unwrap()
+                    .contains("keeps working"),
+                "{mount} does not warn that the credential outlives the lease"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn help_for_an_unmounted_engine_is_not_found() {
+        let state = test_state();
+        let headers = authenticated(&state).await;
+        let response =
+            engine_help(State(state.clone()), headers, Path("nope".to_string())).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Engines that cannot revoke must say so in words, not just in a boolean.
+    /// This is the claim the rest of the documentation rests on.
+    #[test]
+    fn non_revocable_engines_explain_themselves() {
+        let state = test_state();
+        for mount in state.router.mounts() {
+            let doc = mount.engine.doc();
+            if !doc.revocable {
+                let effect = doc.revoke_effect.to_lowercase();
+                assert!(
+                    effect.contains("nothing")
+                        || effect.contains("not applicable")
+                        || effect.contains("keeps working")
+                        || effect.contains("until it expires")
+                        || effect.contains("cannot"),
+                    "{} is not revocable but its revoke_effect does not admit it: {}",
+                    mount.prefix,
+                    doc.revoke_effect
+                );
+            }
+        }
     }
 }

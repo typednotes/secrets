@@ -3,6 +3,7 @@ pub mod barrier;
 pub mod crypto;
 pub mod engine;
 pub mod lease;
+pub mod mount;
 pub mod policy;
 pub mod reaper;
 pub mod router;

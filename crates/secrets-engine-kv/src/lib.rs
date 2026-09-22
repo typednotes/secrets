@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use secrets_core::engine::{EngineError, EngineResult, SecretsEngine};
+use secrets_core::engine::{
+    CredentialShape, EngineDoc, EngineError, EngineResult, PathDoc, SecretsEngine, TtlDoc,
+};
 use secrets_core::storage::{StorageBackend, StorageEntry};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -72,6 +74,55 @@ impl KvEngine {
 
 #[async_trait]
 impl SecretsEngine for KvEngine {
+    fn doc(&self) -> EngineDoc {
+        EngineDoc {
+            provider: "built-in".to_string(),
+            mechanism: "versioned key/value storage behind the AES-256-GCM barrier".to_string(),
+            shape: CredentialShape::StaticCustody,
+            revocable: false,
+            revoke_effect: "not applicable — nothing is leased. Delete the secret \
+                            with DELETE, and rotate it at whatever system issued it: \
+                            deleting our copy does not invalidate the credential."
+                .to_string(),
+            ttl: TtlDoc {
+                min_seconds: None,
+                max_seconds: None,
+                fixed: false,
+                note: "stored values do not expire. Writes create a new version \
+                       rather than overwriting, and DELETE soft-deletes the current one."
+                    .to_string(),
+            },
+            scoping: "by path prefix, via policy. A consumer granted read on \
+                      secret/data/thirdparty/github/ci-bot cannot reach a sibling path."
+                .to_string(),
+            root_credential: "none — but whatever is stored here IS a long-lived \
+                              credential, so treat this mount as custody of last resort."
+                .to_string(),
+            paths: vec![
+                PathDoc::new(
+                    "secret/data/{path}",
+                    &["GET", "POST", "DELETE"],
+                    "read / create / delete",
+                    "read, write or soft-delete a secret. Writing bumps the version.",
+                ),
+                PathDoc::new(
+                    "secret/metadata/{prefix}",
+                    &["GET"],
+                    "list",
+                    "list the secret paths under a prefix",
+                ),
+            ],
+            docs_url: Some("docs/delegation/README.md#five-shapes-of-delegation".to_string()),
+            caveats: vec![
+                "Writes require the `create` capability, not `update` — `update` is \
+                 never checked for this mount."
+                    .to_string(),
+                "Deletion is a soft delete: earlier versions remain in storage."
+                    .to_string(),
+            ],
+        }
+    }
+
     async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
         let metadata = Self::load_metadata(storage, path)
             .await?

@@ -1,0 +1,26 @@
+[package]
+name = "secrets-engine-aws"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AWS STS and IAM credential engine for the secrets server: assumed-role sessions and per-lease IAM users."
+keywords = ["secrets", "aws", "sts", "vault"]
+categories = ["authentication"]
+
+[dependencies]
+secrets-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-sts = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+aws-sdk-iam = { version = "1", default-features = false, features = ["behavior-version-latest", "rustls"] }
+
+[dev-dependencies]
+tokio.workspace = true

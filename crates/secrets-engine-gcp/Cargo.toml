@@ -1,0 +1,23 @@
+[package]
+name = "secrets-engine-gcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Google Cloud credential engine for the secrets server: service-account impersonation, downscoped tokens and HMAC keys."
+keywords = ["secrets", "gcp", "storage", "vault"]
+categories = ["authentication"]
+
+[dependencies]
+secrets-core.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+reqwest.workspace = true
+jsonwebtoken.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

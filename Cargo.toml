@@ -5,6 +5,14 @@ members = [
     "crates/secrets-storage-postgres",
     "crates/secrets-engine-kv",
     "crates/secrets-engine-postgres",
+    "crates/secrets-engine-github",
+    "crates/secrets-engine-gitlab",
+    "crates/secrets-engine-aws",
+    "crates/secrets-engine-gcp",
+    "crates/secrets-engine-gworkspace",
+    "crates/secrets-engine-dropbox",
+    "crates/secrets-engine-m365",
+    "crates/secrets-engine-federation",
     "crates/secrets-auth-userpass",
     "crates/secrets-auth-oidc",
     "crates/secrets-server",
@@ -21,6 +29,14 @@ secrets-core = { path = "crates/secrets-core", version = "0.1.0" }
 secrets-storage-postgres = { path = "crates/secrets-storage-postgres", version = "0.1.0" }
 secrets-engine-kv = { path = "crates/secrets-engine-kv", version = "0.1.0" }
 secrets-engine-postgres = { path = "crates/secrets-engine-postgres", version = "0.1.0" }
+secrets-engine-github = { path = "crates/secrets-engine-github", version = "0.1.0" }
+secrets-engine-gitlab = { path = "crates/secrets-engine-gitlab", version = "0.1.0" }
+secrets-engine-aws = { path = "crates/secrets-engine-aws", version = "0.1.0" }
+secrets-engine-gcp = { path = "crates/secrets-engine-gcp", version = "0.1.0" }
+secrets-engine-gworkspace = { path = "crates/secrets-engine-gworkspace", version = "0.1.0" }
+secrets-engine-dropbox = { path = "crates/secrets-engine-dropbox", version = "0.1.0" }
+secrets-engine-m365 = { path = "crates/secrets-engine-m365", version = "0.1.0" }
+secrets-engine-federation = { path = "crates/secrets-engine-federation", version = "0.1.0" }
 secrets-auth-userpass = { path = "crates/secrets-auth-userpass", version = "0.1.0" }
 secrets-auth-oidc = { path = "crates/secrets-auth-oidc", version = "0.1.0" }
 
@@ -39,6 +55,8 @@ base64 = "0.23"
 hex = "0.4"
 sha2 = "0.11"
 toml = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
+jsonwebtoken = "11"
 
 [profile.release]
 lto = true

@@ -27,6 +27,115 @@ pub struct AppState {
     pub oidc: OidcAuthMethod,
 }
 
+/// Every engine this server mounts, and where. This is the composition root's
+/// composition root: adding a provider means adding it here and nowhere else.
+///
+/// Separated from `build` so tests can assert against the real mount table
+/// rather than a copy of it that drifts.
+pub fn engine_mounts() -> Vec<EngineMount> {
+        let kv: Arc<dyn SecretsEngine> = Arc::new(KvEngine::new());
+        let postgres: Arc<dyn SecretsEngine> = Arc::new(PostgresEngine::new());
+        // Each third-party engine is mounted twice: once at `{name}/creds/` so a
+        // generate request resolves to just the role name, and once at `{name}/`
+        // for the operator's config/roles surface and the help endpoint.
+        let github: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_github::GithubEngine::new());
+        let gitlab: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gitlab::GitlabEngine::new());
+        let aws: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_aws::AwsEngine::new());
+        let gcp: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gcp::GcpEngine::new());
+        let gworkspace: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gworkspace::GworkspaceEngine::new());
+        let dropbox: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_dropbox::DropboxEngine::new());
+        let m365: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_m365::M365Engine::new());
+        let federation: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_federation::FederationEngine::new());
+        vec![
+            EngineMount {
+                prefix: "secret/data/".to_string(),
+                engine: kv.clone(),
+            },
+            EngineMount {
+                prefix: "secret/metadata/".to_string(),
+                engine: kv.clone(),
+            },
+            // Catch-all for the KV mount so `GET /v1/secret/help` resolves. Longest
+            // -prefix match means data/ and metadata/ still win for real requests.
+            EngineMount {
+                prefix: "secret/".to_string(),
+                engine: kv,
+            },
+            EngineMount {
+                prefix: "database/creds/".to_string(),
+                engine: postgres.clone(),
+            },
+            EngineMount {
+                prefix: "database/".to_string(),
+                engine: postgres,
+            },
+            EngineMount {
+                prefix: "github/creds/".to_string(),
+                engine: github.clone(),
+            },
+            EngineMount {
+                prefix: "github/".to_string(),
+                engine: github,
+            },
+            EngineMount {
+                prefix: "gitlab/creds/".to_string(),
+                engine: gitlab.clone(),
+            },
+            EngineMount {
+                prefix: "gitlab/".to_string(),
+                engine: gitlab,
+            },
+            EngineMount {
+                prefix: "aws/creds/".to_string(),
+                engine: aws.clone(),
+            },
+            EngineMount {
+                prefix: "aws/".to_string(),
+                engine: aws,
+            },
+            EngineMount {
+                prefix: "gcp/creds/".to_string(),
+                engine: gcp.clone(),
+            },
+            EngineMount {
+                prefix: "gcp/".to_string(),
+                engine: gcp,
+            },
+            EngineMount {
+                prefix: "gworkspace/creds/".to_string(),
+                engine: gworkspace.clone(),
+            },
+            EngineMount {
+                prefix: "gworkspace/".to_string(),
+                engine: gworkspace,
+            },
+            EngineMount {
+                prefix: "dropbox/creds/".to_string(),
+                engine: dropbox.clone(),
+            },
+            EngineMount {
+                prefix: "dropbox/".to_string(),
+                engine: dropbox,
+            },
+            EngineMount {
+                prefix: "m365/creds/".to_string(),
+                engine: m365.clone(),
+            },
+            EngineMount {
+                prefix: "m365/".to_string(),
+                engine: m365,
+            },
+            EngineMount {
+                prefix: "federation/creds/".to_string(),
+                engine: federation.clone(),
+            },
+            EngineMount {
+                prefix: "federation/".to_string(),
+                engine: federation,
+            },
+        ]
+}
+
 pub async fn build(config: &Config) -> anyhow::Result<AppState> {
     let master_key = StaticMasterKeyProvider::from_env(&config.master_key_env)
         .map_err(|_| anyhow::anyhow!("failed to load master key from {}", config.master_key_env))?;
@@ -39,26 +148,7 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
         bootstrap_admin(storage.as_ref(), username, password).await?;
     }
 
-    let kv: Arc<dyn SecretsEngine> = Arc::new(KvEngine::new());
-    let postgres: Arc<dyn SecretsEngine> = Arc::new(PostgresEngine::new());
-    let router = Arc::new(Router::new(vec![
-        EngineMount {
-            prefix: "secret/data/".to_string(),
-            engine: kv.clone(),
-        },
-        EngineMount {
-            prefix: "secret/metadata/".to_string(),
-            engine: kv,
-        },
-        EngineMount {
-            prefix: "database/creds/".to_string(),
-            engine: postgres.clone(),
-        },
-        EngineMount {
-            prefix: "database/".to_string(),
-            engine: postgres,
-        },
-    ]));
+    let router = Arc::new(Router::new(engine_mounts()));
 
     secrets_core::reaper::spawn_reaper(
         storage.clone(),

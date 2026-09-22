@@ -134,6 +134,21 @@ mod tests {
 
     #[async_trait]
     impl SecretsEngine for FakeEngine {
+        fn doc(&self) -> crate::engine::EngineDoc {
+            crate::engine::EngineDoc {
+                provider: "fake".to_string(),
+                mechanism: "test double".to_string(),
+                shape: crate::engine::CredentialShape::MintAndRevoke,
+                revocable: true,
+                revoke_effect: "counts the call".to_string(),
+                ttl: crate::engine::TtlDoc::fixed(60, "test"),
+                scoping: "none".to_string(),
+                root_credential: "none".to_string(),
+                paths: vec![],
+                docs_url: None,
+                caveats: vec![],
+            }
+        }
         async fn read(&self, _storage: &dyn StorageBackend, _path: &str) -> EngineResult<serde_json::Value> {
             unimplemented!()
         }
