@@ -15,6 +15,7 @@ async-trait.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+sha2.workspace = true
 sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "migrate"] }
 
 [dev-dependencies]

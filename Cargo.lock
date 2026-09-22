@@ -3213,6 +3213,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "secrets-core",
+ "sha2 0.11.0",
  "sqlx",
  "testcontainers",
  "testcontainers-modules",

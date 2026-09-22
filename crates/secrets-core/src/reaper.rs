@@ -65,10 +65,35 @@ pub async fn reap_once(storage: &dyn StorageBackend, router: &Router) -> Result<
     Ok(reaped)
 }
 
-/// Spawns a background task that calls `reap_once` on a fixed interval for
-/// the lifetime of the process. Single-node only: a multi-node deployment
-/// would need a Postgres advisory lock here so only one instance reaps at a
-/// time.
+/// Elects the single replica allowed to reap. Every node competes for this
+/// one name, so the value matters only in that it must be identical
+/// everywhere.
+pub const REAPER_LOCK: &str = "secrets/lease-reaper";
+
+/// Runs one reap pass, but only on the replica that holds the reaper lock.
+/// Returns `None` on a standby node, which has nothing to do.
+///
+/// Without this, every replica would scan the same leases and revoke each one
+/// concurrently — mostly harmless, since engines treat an already-revoked
+/// credential as success, but it multiplies provider API calls by the replica
+/// count and races on engines that cannot.
+pub async fn reap_once_if_leader(
+    storage: &dyn StorageBackend,
+    router: &Router,
+) -> Result<Option<usize>, ReaperError> {
+    if !storage.try_acquire_lock(REAPER_LOCK).await? {
+        return Ok(None);
+    }
+    reap_once(storage, router).await.map(Some)
+}
+
+/// Spawns a background task that reaps on a fixed interval for the lifetime of
+/// the process, on whichever replica wins the lock.
+///
+/// The lock is taken once and held, rather than passed around each tick: a
+/// stable leader avoids re-contending every interval, and because the lock
+/// lives on a held connection, a crashed leader releases it automatically and
+/// the next tick elsewhere picks the work up.
 pub fn spawn_reaper(
     storage: Arc<dyn StorageBackend>,
     router: Arc<Router>,
@@ -76,11 +101,25 @@ pub fn spawn_reaper(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(interval);
+        let mut announced_standby = false;
         loop {
             ticker.tick().await;
-            match reap_once(storage.as_ref(), router.as_ref()).await {
-                Ok(count) if count > 0 => tracing::info!(count, "reaped expired leases"),
-                Ok(_) => {}
+            match reap_once_if_leader(storage.as_ref(), router.as_ref()).await {
+                Ok(Some(count)) if count > 0 => {
+                    tracing::info!(count, "reaped expired leases")
+                }
+                Ok(Some(_)) => {}
+                // Logged once, not every tick: on a multi-replica deployment
+                // most nodes are standbys for their whole lifetime.
+                Ok(None) => {
+                    if !announced_standby {
+                        announced_standby = true;
+                        tracing::info!(
+                            lock = REAPER_LOCK,
+                            "another replica holds the lease-reaper lock; standing by"
+                        );
+                    }
+                }
                 Err(e) => tracing::warn!(error = %e, "lease reaper pass failed"),
             }
         }
@@ -181,6 +220,75 @@ mod tests {
             issued_at: Utc::now(),
             expires_at,
         }
+    }
+
+    /// Stands in for a replica that lost the reaper election: it stores
+    /// normally but never wins the lock.
+    struct Standby<B>(B);
+
+    #[async_trait]
+    impl<B: StorageBackend> StorageBackend for Standby<B> {
+        async fn get(&self, path: &str) -> StorageResult<Option<StorageEntry>> {
+            self.0.get(path).await
+        }
+        async fn put(&self, path: &str, entry: StorageEntry) -> StorageResult<()> {
+            self.0.put(path, entry).await
+        }
+        async fn delete(&self, path: &str) -> StorageResult<()> {
+            self.0.delete(path).await
+        }
+        async fn list(&self, prefix: &str) -> StorageResult<Vec<String>> {
+            self.0.list(prefix).await
+        }
+        async fn try_acquire_lock(&self, _key: &str) -> StorageResult<bool> {
+            Ok(false)
+        }
+    }
+
+    /// The whole point of the lock: a standby must not touch the provider.
+    /// Without this, every replica revokes every expired lease.
+    #[tokio::test]
+    async fn a_standby_replica_does_not_reap() {
+        let storage = Standby(MemStorage::default());
+        let engine = Arc::new(FakeEngine::default());
+        let router = Router::new(vec![EngineMount {
+            prefix: "database/creds/".to_string(),
+            engine: engine.clone() as Arc<dyn SecretsEngine>,
+        }]);
+
+        let expired = lease("tok", Utc::now() - chrono::Duration::seconds(10));
+        lease::store_lease(&storage, &expired).await.unwrap();
+
+        let outcome = reap_once_if_leader(&storage, &router).await.unwrap();
+        assert!(outcome.is_none(), "standby reported a reap pass");
+        assert_eq!(
+            engine.revoked.load(Ordering::SeqCst),
+            0,
+            "standby called the provider anyway"
+        );
+        assert_eq!(
+            lease::list_leases(&storage).await.unwrap().len(),
+            1,
+            "standby deleted a lease it does not own"
+        );
+    }
+
+    /// The default `try_acquire_lock` grants unconditionally, so a single-node
+    /// deployment keeps reaping with no lock support in its backend.
+    #[tokio::test]
+    async fn the_leader_reaps() {
+        let storage = MemStorage::default();
+        let engine = Arc::new(FakeEngine::default());
+        let router = Router::new(vec![EngineMount {
+            prefix: "database/creds/".to_string(),
+            engine: engine.clone() as Arc<dyn SecretsEngine>,
+        }]);
+
+        let expired = lease("tok", Utc::now() - chrono::Duration::seconds(10));
+        lease::store_lease(&storage, &expired).await.unwrap();
+
+        assert_eq!(reap_once_if_leader(&storage, &router).await.unwrap(), Some(1));
+        assert_eq!(engine.revoked.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

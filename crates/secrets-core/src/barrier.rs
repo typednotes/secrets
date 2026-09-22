@@ -56,4 +56,15 @@ impl<B: StorageBackend> StorageBackend for Barrier<B> {
     async fn list(&self, prefix: &str) -> StorageResult<Vec<String>> {
         self.inner.list(prefix).await
     }
+
+    // Neither of these touches stored values, so the barrier has nothing to
+    // encrypt or decrypt — but it must still pass them through, or wrapping a
+    // backend would silently downgrade it to the permissive defaults.
+    async fn ping(&self) -> StorageResult<()> {
+        self.inner.ping().await
+    }
+
+    async fn try_acquire_lock(&self, key: &str) -> StorageResult<bool> {
+        self.inner.try_acquire_lock(key).await
+    }
 }

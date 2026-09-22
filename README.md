@@ -63,8 +63,14 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
 - **Leases**: every dynamic credential is tracked as a lease with an
   expiry; a background reaper revokes expired ones, and revoking a token
   cascades to revoke every lease it owns.
-- **Single node.** No HA, no clustering, no namespaces, no audit-log
-  backend beyond structured `tracing` output.
+- **Horizontally scalable.** Requests hold no in-process state — tokens are
+  looked up by `sha256` in storage on every call, and policies, leases and
+  OIDC PKCE state all live there too — so replicas sit behind a load balancer
+  with no session affinity. The lease reaper is the one singleton, elected by
+  a Postgres advisory lock. See [Running multiple
+  replicas](#running-multiple-replicas).
+- No namespaces, no audit-log backend beyond structured `tracing` output, and
+  no master-key rotation.
 
 ## Architecture
 
@@ -149,6 +155,36 @@ environment variables (prefixed `SECRETS_SERVER_`) take precedence. See
 `crates/secrets-server/src/config.rs` for every field and its default —
 config is validated at startup, so a typo'd `listen_addr` or a
 non-Postgres `storage_database_url` fails fast instead of surfacing later.
+
+## Running multiple replicas
+
+Run as many instances as you like behind a load balancer, pointed at the same
+storage database. No configuration change is needed.
+
+Two details make it work:
+
+- **The reaper is elected, not duplicated.** Every instance competes for the
+  `secrets/lease-reaper` advisory lock and only the winner revokes expired
+  leases; the rest log once and stand by. The lock lives on a held Postgres
+  connection, so a crashed leader releases it the moment its connection drops
+  and the next tick elsewhere picks the work up — no heartbeat, no lease
+  timeout to tune. Backends that do not implement `try_acquire_lock` grant it
+  unconditionally, so single-node deployments are unaffected.
+- **`/v1/sys/health` is a real probe.** It runs `SELECT 1` and answers `503`
+  when storage is unreachable, so a load balancer takes a broken node out of
+  rotation.
+
+What you still have to provide:
+
+- **An HA Postgres.** That is where durability, consensus and failover
+  actually live.
+- **The master key on every node.** `SECRETS_MASTER_KEY` must be identical
+  across replicas, since they share one encrypted store. A KMS-backed unseal
+  would be the upgrade if distributing the key that widely is a concern.
+
+Not yet addressed: `reap_once` enumerates every lease each pass, which is
+fine at modest lease volume but wants an `expires_at` index and a narrower
+query before it gets large.
 
 ## HTTP API
 
@@ -291,11 +327,16 @@ request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 This is an early-stage, single-maintainer project — treat it as a
 learning/reference implementation, not production-hardened software yet.
-Explicitly out of scope for v1: namespaces, HA/replication (the lease
-reaper takes no distributed lock — a Postgres advisory lock is where that
-would go), an audit-log backend beyond structured logs, a web UI, other
-secrets engines (PKI, transit, ...), other storage backends, and Shamir
-seal/unseal.
+Explicitly out of scope for v1: namespaces, an audit-log backend beyond
+structured logs, a web UI, other secrets engines (PKI, transit, ...), other
+storage backends, Shamir seal/unseal, and master-key rotation — nothing here
+can rekey the barrier today, which is the most significant remaining gap.
+
+Availability is delegated to Postgres rather than reimplemented: unlike Vault
+and OpenBao, which own their own Raft consensus precisely so they need no
+database, this depends on one already. That removes the need for an
+active/standby model, request forwarding, peer membership and snapshotting —
+and means your HA story is your Postgres HA story.
 
 ## Further reading
 

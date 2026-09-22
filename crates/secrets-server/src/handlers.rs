@@ -99,10 +99,19 @@ async fn require_capability(
     }
 }
 
-async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
-    match state.storage.list("").await {
-        Ok(_) => Json(json!({ "status": "ok" })),
-        Err(e) => Json(json!({ "status": "error", "detail": e.to_string() })),
+/// Deliberately cheap. A load balancer probes this across every replica
+/// forever, so it must not touch application data — it used to `list("")`,
+/// which is a full scan of every key in storage. It also has to answer with a
+/// non-2xx status when broken, or an LB would never take the node out of
+/// rotation.
+async fn health(State(state): State<Arc<AppState>>) -> Response {
+    match state.storage.ping().await {
+        Ok(()) => (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "error", "detail": e.to_string() })),
+        )
+            .into_response(),
     }
 }
 
@@ -752,6 +761,55 @@ mod tests {
                 .cloned()
                 .collect())
         }
+    }
+
+    /// A backend whose liveness probe fails, standing in for a lost database.
+    struct Unreachable;
+
+    #[async_trait]
+    impl StorageBackend for Unreachable {
+        async fn get(&self, _: &str) -> StorageResult<Option<StorageEntry>> {
+            Err(secrets_core::storage::StorageError::Backend("down".into()))
+        }
+        async fn put(&self, _: &str, _: StorageEntry) -> StorageResult<()> {
+            Err(secrets_core::storage::StorageError::Backend("down".into()))
+        }
+        async fn delete(&self, _: &str) -> StorageResult<()> {
+            Err(secrets_core::storage::StorageError::Backend("down".into()))
+        }
+        async fn list(&self, _: &str) -> StorageResult<Vec<String>> {
+            Err(secrets_core::storage::StorageError::Backend("down".into()))
+        }
+        async fn ping(&self) -> StorageResult<()> {
+            Err(secrets_core::storage::StorageError::Backend("connection refused".into()))
+        }
+    }
+
+    fn state_with(storage: Arc<dyn StorageBackend>) -> Arc<AppState> {
+        Arc::new(AppState {
+            storage,
+            router: Arc::new(Router::new(crate::wiring::engine_mounts())),
+            userpass: secrets_auth_userpass::UserPassAuth::new(),
+            oidc: secrets_auth_oidc::OidcAuthMethod::new(),
+        })
+    }
+
+    #[tokio::test]
+    async fn health_is_ok_when_storage_answers() {
+        let response = health(State(test_state())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(body_json(response).await["status"], "ok");
+    }
+
+    /// A load balancer keys on the status code, so a broken node must not
+    /// answer 200. It previously did, which would have kept it in rotation.
+    #[tokio::test]
+    async fn health_fails_with_a_non_2xx_status_when_storage_is_down() {
+        let response = health(State(state_with(Arc::new(Unreachable)))).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = body_json(response).await;
+        assert_eq!(body["status"], "error");
+        assert!(body["detail"].as_str().unwrap().contains("connection refused"));
     }
 
     fn test_state() -> Arc<AppState> {

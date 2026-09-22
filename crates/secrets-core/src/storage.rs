@@ -24,4 +24,24 @@ pub trait StorageBackend: Send + Sync {
     async fn put(&self, path: &str, entry: StorageEntry) -> StorageResult<()>;
     async fn delete(&self, path: &str) -> StorageResult<()>;
     async fn list(&self, prefix: &str) -> StorageResult<Vec<String>>;
+
+    /// Cheap liveness probe for the health endpoint. It must stay cheap: a
+    /// load balancer calls it constantly, against every replica, forever.
+    async fn ping(&self) -> StorageResult<()> {
+        Ok(())
+    }
+
+    /// Best-effort cross-process mutual exclusion, so exactly one replica
+    /// runs a singleton background task. Granting unconditionally is correct
+    /// for a single-node or in-memory backend, which is why that is the
+    /// default.
+    ///
+    /// A real implementation must tie the lock to the connection holding it,
+    /// so that a crashed node releases it without anyone noticing — that is
+    /// what makes failover work without heartbeats or timeouts. There is
+    /// deliberately no `release`: the lock is held for the process lifetime
+    /// and the backend reclaims it when the connection dies.
+    async fn try_acquire_lock(&self, _key: &str) -> StorageResult<bool> {
+        Ok(true)
+    }
 }
