@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-auth-oidc"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2981,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-auth-userpass"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-core"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -3014,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-aws"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -3033,7 +3033,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-dropbox"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -3049,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-federation"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-gcp"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3081,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-github"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-gitlab"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-gworkspace"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-kv"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3140,7 +3140,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-m365"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3156,7 +3156,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-engine-postgres"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3175,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-server"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3208,7 +3208,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-storage-postgres"
-version = "0.1.1"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
