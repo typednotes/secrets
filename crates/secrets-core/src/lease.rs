@@ -42,6 +42,24 @@ pub async fn get_lease(storage: &dyn StorageBackend, id: Uuid) -> Result<Option<
     Ok(Some(lease))
 }
 
+/// Only the leases whose expiry has passed, asked of the backend rather than
+/// filtered in memory. This is the reaper's hot path.
+pub async fn list_expired_leases(
+    storage: &dyn StorageBackend,
+    now: DateTime<Utc>,
+) -> Result<Vec<Lease>, StorageError> {
+    let keys = storage.list_expired(LEASE_PREFIX, now).await?;
+    let mut leases = Vec::with_capacity(keys.len());
+    for key in keys {
+        if let Some(entry) = storage.get(&key).await?
+            && let Ok(lease) = serde_json::from_slice::<Lease>(&entry.value)
+        {
+            leases.push(lease);
+        }
+    }
+    Ok(leases)
+}
+
 pub async fn delete_lease(storage: &dyn StorageBackend, id: Uuid) -> Result<(), StorageError> {
     storage.delete(&format!("{LEASE_PREFIX}{id}")).await
 }

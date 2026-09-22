@@ -54,12 +54,10 @@ pub async fn revoke_leases_for_token(
 pub async fn reap_once(storage: &dyn StorageBackend, router: &Router) -> Result<usize, ReaperError> {
     let now = Utc::now();
     let mut reaped = 0;
-    for lease in lease::list_leases(storage).await? {
-        if lease.expires_at <= now {
-            match revoke_lease(storage, router, &lease).await {
-                Ok(()) => reaped += 1,
-                Err(e) => tracing::warn!(lease_id = %lease.id, error = %e, "failed to reap lease"),
-            }
+    for lease in lease::list_expired_leases(storage, now).await? {
+        match revoke_lease(storage, router, &lease).await {
+            Ok(()) => reaped += 1,
+            Err(e) => tracing::warn!(lease_id = %lease.id, error = %e, "failed to reap lease"),
         }
     }
     Ok(reaped)

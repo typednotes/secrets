@@ -27,10 +27,13 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
 
 - **Storage**: PostgreSQL only, behind a `StorageBackend` trait so another
   backend could be added later without touching anything above it.
-- **Encryption**: a single master key (env var, or a file path held in that
-  env var) — no Shamir seal/unseal. A `Barrier` decorator transparently
+- **Encryption**: a master key from an env var (or a file path held in it) —
+  no Shamir seal/unseal. A `Barrier` decorator transparently
   AES-256-GCM-encrypts every value before it reaches storage; paths stay
   plaintext so leases/tokens can be expiry-scanned without decrypting.
+  **Rotatable**: each value records which key sealed it, so a new key can be
+  introduced alongside the old one and the store rewrapped in place — see
+  [Rotating the master key](#rotating-the-master-key).
 - **Secrets engines**:
   - `secret/` — a versioned, soft-deleting static KV store (kv-v2 style).
   - `database/` — dynamic PostgreSQL credentials: configure a target
@@ -69,8 +72,7 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
   with no session affinity. The lease reaper is the one singleton, elected by
   a Postgres advisory lock. See [Running multiple
   replicas](#running-multiple-replicas).
-- No namespaces, no audit-log backend beyond structured `tracing` output, and
-  no master-key rotation.
+- No namespaces and no audit-log backend beyond structured `tracing` output.
 
 ## Architecture
 
@@ -182,9 +184,51 @@ What you still have to provide:
   across replicas, since they share one encrypted store. A KMS-backed unseal
   would be the upgrade if distributing the key that widely is a concern.
 
-Not yet addressed: `reap_once` enumerates every lease each pass, which is
-fine at modest lease volume but wants an `expires_at` index and a narrower
-query before it gets large.
+## Rotating the master key
+
+Each stored value records the id of the key that sealed it — derived from the
+key's own SHA-256, so there are no labels to keep in sync and a key cannot be
+mislabelled. That makes rotation an online, resumable operation rather than a
+dump-and-restore.
+
+```mermaid
+flowchart LR
+    A["1. generate a new key<br/>openssl rand -hex 32"] --> B["2. restart with the new key<br/>active and the old one retired"]
+    B --> C["3. POST /v1/sys/rewrap<br/>re-seals every value"]
+    C --> D["4. drop the retired key<br/>and restart"]
+```
+
+```bash
+# 2. both keys present: the new one seals, the old one still opens
+export SECRETS_MASTER_KEY=$NEW_KEY
+export SECRETS_MASTER_KEY_RETIRED=$OLD_KEY   # comma-separated if several
+
+# 3. re-encrypt everything under the active key
+curl -s -X POST "$ADDR/v1/sys/rewrap" -H "Authorization: Bearer $TOKEN" | jq
+# => {"scanned": 412, "rewrapped": 412, "unchanged": 0, "contended": 0,
+#     "failed": 0, "active_key_id": "9f2c1ab4",
+#     "next_step": "every value is on the active key — ..."}
+
+# 4. only once failed == 0
+unset SECRETS_MASTER_KEY_RETIRED
+```
+
+Notes that matter:
+
+- **Do not skip step 2.** Removing the old key before rewrapping makes every
+  value written under it unreadable, and there is no recovery.
+- `failed > 0` means a key still in use is missing from the ring. Restore it
+  and re-run *before* removing anything; the pass keeps going rather than
+  aborting, so the count tells you the scale of the problem.
+- Safe to re-run and safe to run while serving. Rewrapping is conditional on
+  the ciphertext it read, so a concurrent write is never clobbered by a
+  re-encryption of the value it replaced — those show up as `contended`, which
+  is benign because that write used the active key anyway.
+- Values written before 1.0 carry no key id. They are read on a fallback path
+  and reported as needing rewrap, so upgrading and rewrapping once brings the
+  whole store onto the versioned format.
+- `GET /v1/sys/rewrap` reports the active key id. Every replica must agree; if
+  they disagree, one is running with stale configuration.
 
 ## HTTP API
 
@@ -204,6 +248,7 @@ POST  /v1/auth/token/revoke-self
 GET/POST/DELETE /v1/secret/data/{path}  # KV engine
 GET   /v1/secret/metadata/{path}
 
+GET/POST /v1/sys/rewrap                 # active master key / re-encrypt (Sudo)
 GET   /v1/sys/help                      # every mounted engine and its shape
 GET   /v1/{mount}/help                  # one engine's own documentation
 
@@ -282,6 +327,12 @@ route table has no conflicts, that every mounted engine describes itself, and
 that no engine claims more revocability than its shape allows — so a `_doc`
 block cannot quietly start lying.
 
+Key rotation is covered end to end against an in-memory barrier: that
+pre-1.0 unversioned values still open, that a retired key opens what it
+sealed, that dropping a key still in use fails loudly instead of returning
+garbage, that rewrapping is idempotent, and that a concurrent write is never
+overwritten by a re-encryption of stale plaintext.
+
 `cargo clippy --workspace --all-targets -- -D warnings` is clean.
 
 ### Integration tests against a running server
@@ -329,8 +380,7 @@ This is an early-stage, single-maintainer project — treat it as a
 learning/reference implementation, not production-hardened software yet.
 Explicitly out of scope for v1: namespaces, an audit-log backend beyond
 structured logs, a web UI, other secrets engines (PKI, transit, ...), other
-storage backends, Shamir seal/unseal, and master-key rotation — nothing here
-can rekey the barrier today, which is the most significant remaining gap.
+storage backends, and Shamir seal/unseal.
 
 Availability is delegated to Postgres rather than reimplemented: unlike Vault
 and OpenBao, which own their own Raft consensus precisely so they need no

@@ -25,6 +25,48 @@ pub trait StorageBackend: Send + Sync {
     async fn delete(&self, path: &str) -> StorageResult<()>;
     async fn list(&self, prefix: &str) -> StorageResult<Vec<String>>;
 
+    /// Paths under `prefix` whose `expires_at` has already passed.
+    ///
+    /// The default walks every key and fetches it, which is what the lease
+    /// reaper used to do unconditionally. A backend that keeps expiry in a
+    /// queryable column should override this: the reaper runs on an interval
+    /// forever, so the naive scan is O(all leases) per pass per deployment.
+    async fn list_expired(&self, prefix: &str, now: DateTime<Utc>) -> StorageResult<Vec<String>> {
+        let mut expired = Vec::new();
+        for path in self.list(prefix).await? {
+            if let Some(entry) = self.get(&path).await?
+                && entry.expires_at.is_some_and(|at| at <= now)
+            {
+                expired.push(path);
+            }
+        }
+        Ok(expired)
+    }
+
+    /// Replaces `path`'s value only if it still holds exactly `expected`,
+    /// returning false when it changed underneath.
+    ///
+    /// Needed by key rotation, which decrypts and re-encrypts in three steps:
+    /// without this, a write landing between the read and the write would be
+    /// silently overwritten by a re-encryption of stale plaintext.
+    ///
+    /// The default is read-compare-write, which is *not* atomic — override it
+    /// wherever the backend can do the comparison itself.
+    async fn replace_if_unchanged(
+        &self,
+        path: &str,
+        expected: &[u8],
+        entry: StorageEntry,
+    ) -> StorageResult<bool> {
+        match self.get(path).await? {
+            Some(current) if current.value == expected => {
+                self.put(path, entry).await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// Cheap liveness probe for the health endpoint. It must stay cheap: a
     /// load balancer calls it constantly, against every replica, forever.
     async fn ping(&self) -> StorageResult<()> {

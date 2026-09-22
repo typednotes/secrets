@@ -41,6 +41,7 @@ pub fn router(state: Arc<AppState>) -> AxumRouter {
         // Self-documentation. Generic over the mount so every engine — the
         // ones here today and the ones added later — is discoverable and
         // describable without touching this file again.
+        .route("/v1/sys/rewrap", post(rewrap).get(rewrap_status))
         .route("/v1/sys/help", get(sys_help))
         .route("/v1/{mount}/help", get(engine_help))
         .route(
@@ -426,6 +427,54 @@ async fn secret_list(
     }
 }
 
+/// Which key this replica is sealing with. Cheap, and the thing you want to
+/// check first when a rotation looks stuck — every replica must report the
+/// same active key.
+async fn rewrap_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Err(resp) = require_capability(&state, &headers, "sys/rewrap", Capability::Sudo).await {
+        return resp;
+    }
+    Json(json!({
+        "active_key_id": state.rotation.active_key_id(),
+        "note": "POST here to re-encrypt every stored value under the active key. \
+                 Safe to re-run: a second pass reports everything as unchanged.",
+    }))
+    .into_response()
+}
+
+/// Re-encrypts the whole store under the active master key.
+///
+/// Deliberately synchronous: it walks every value, so an operator should see
+/// it finish (or fail) rather than fire it off and hope. `failed` above zero
+/// means a key that is still in use was dropped from the ring — restore it
+/// and run again before removing anything.
+async fn rewrap(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Err(resp) = require_capability(&state, &headers, "sys/rewrap", Capability::Sudo).await {
+        return resp;
+    }
+    match state.rotation.rewrap_all().await {
+        Ok(report) => {
+            let complete = report.failed == 0;
+            let mut body = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
+            if let Some(object) = body.as_object_mut() {
+                object.insert("active_key_id".to_string(), json!(state.rotation.active_key_id()));
+                object.insert(
+                    "next_step".to_string(),
+                    json!(if complete {
+                        "every value is on the active key — you can now remove the \
+                         retired keys from SECRETS_MASTER_KEY_RETIRED and restart."
+                    } else {
+                        "some values could not be opened by any key in the ring. Restore \
+                         the missing key and run this again BEFORE removing anything."
+                    }),
+                );
+            }
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 /// Documentation is not a secret, so any authenticated caller may read it.
 /// A consumer holding only `read` on one `creds` path can therefore still
 /// discover what its credential is worth and what revoking it would do.
@@ -493,6 +542,10 @@ async fn sys_help(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Res
             "refresh-broker": "The durable secret stays here; only a short-lived access token is handed out.",
             "static-custody": "Nothing is mintable — encrypted custody plus rotation.",
             "federation": "No credential exists anywhere; the consumer's own identity is trusted by the provider.",
+        },
+        "operations": {
+            "GET /v1/sys/rewrap": "which master key this replica seals with (sudo)",
+            "POST /v1/sys/rewrap": "re-encrypt every stored value under the active master key (sudo)",
         },
         "conventions": {
             "{mount}/config/{name}": "operator: the provider connection and root credential (sudo)",
@@ -730,6 +783,8 @@ async fn revoke_lease_handler(
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use secrets_core::barrier::Barrier;
+    use secrets_core::crypto::KeyRing;
     use secrets_core::router::Router;
     use secrets_core::storage::{StorageBackend, StorageEntry, StorageResult};
     use std::collections::HashMap;
@@ -788,10 +843,52 @@ mod tests {
     fn state_with(storage: Arc<dyn StorageBackend>) -> Arc<AppState> {
         Arc::new(AppState {
             storage,
+            rotation: Arc::new(Barrier::new(
+                MemStorage::default(),
+                Arc::new(KeyRing::new(&[11u8; 32], &[])),
+            )),
             router: Arc::new(Router::new(crate::wiring::engine_mounts())),
             userpass: secrets_auth_userpass::UserPassAuth::new(),
             oidc: secrets_auth_oidc::OidcAuthMethod::new(),
         })
+    }
+
+    #[tokio::test]
+    async fn rewrap_requires_sudo() {
+        let state = test_state();
+        // A token whose policy does not exist has no capabilities at all.
+        let headers = authenticated(&state).await;
+        let response = rewrap(State(state.clone()), headers).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let anonymous = rewrap(State(state), HeaderMap::new()).await;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rewrap_reports_progress_and_the_active_key() {
+        let state = test_state();
+        let headers = sudo(&state).await;
+
+        state
+            .storage
+            .put(
+                "secret/data/kv-data/app/v1",
+                secrets_core::storage::StorageEntry {
+                    value: b"hunter2".to_vec(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let body = body_json(rewrap(State(state.clone()), headers).await).await;
+        assert!(body["scanned"].as_u64().unwrap() >= 1);
+        // Freshly written through the barrier, so already on the active key.
+        assert_eq!(body["rewrapped"], 0);
+        assert_eq!(body["failed"], 0);
+        assert!(body["active_key_id"].as_str().is_some_and(|id| id.len() == 8));
+        assert!(body["next_step"].as_str().unwrap().contains("retired keys"));
     }
 
     #[tokio::test]
@@ -813,8 +910,15 @@ mod tests {
     }
 
     fn test_state() -> Arc<AppState> {
+        // A real barrier over the in-memory store, so `sys/rewrap` exercises
+        // the actual rotation path rather than a stub.
+        let barrier = Arc::new(Barrier::new(
+            MemStorage::default(),
+            Arc::new(KeyRing::new(&[11u8; 32], &[])),
+        ));
         Arc::new(AppState {
-            storage: Arc::new(MemStorage::default()),
+            storage: barrier.clone(),
+            rotation: barrier,
             // The real mount table, so these assertions cover every engine
             // this server actually exposes.
             router: Arc::new(Router::new(crate::wiring::engine_mounts())),
@@ -871,6 +975,22 @@ mod tests {
             .await
             .expect("response body");
         serde_json::from_slice(&bytes).expect("response is JSON")
+    }
+
+    /// A token carrying a policy that actually grants sudo everywhere, for
+    /// the operator-only routes.
+    async fn sudo(state: &AppState) -> HeaderMap {
+        let policy = secrets_core::policy::Policy {
+            name: "root".to_string(),
+            rules: vec![secrets_core::policy::PathRule {
+                prefix: String::new(),
+                capabilities: vec![Capability::Sudo],
+            }],
+        };
+        secrets_core::policy::store_policy(state.storage.as_ref(), &policy)
+            .await
+            .expect("store policy");
+        authenticated(state).await
     }
 
     /// Mints a real token in the in-memory store so the help handlers, which

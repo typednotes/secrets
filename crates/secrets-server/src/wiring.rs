@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use secrets_auth_oidc::OidcAuthMethod;
 use secrets_auth_userpass::UserPassAuth;
-use secrets_core::barrier::Barrier;
-use secrets_core::crypto::{Aead, Aes256GcmAead, MasterKeyProvider, StaticMasterKeyProvider};
+use secrets_core::barrier::{Barrier, KeyRotation};
+use secrets_core::crypto::{Aead, KeyRing, MasterKeyProvider, StaticMasterKeyProvider};
 use secrets_core::engine::SecretsEngine;
 use secrets_core::policy::{self, Capability, PathRule, Policy};
 use secrets_core::router::{EngineMount, Router};
@@ -22,6 +22,10 @@ const ROOT_POLICY_NAME: &str = "root";
 /// trait elsewhere and wiring it in here.
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
+    /// The same barrier as `storage`, kept behind its rotation trait so
+    /// `sys/rewrap` can reach the keys — which nothing above the barrier
+    /// otherwise knows about.
+    pub rotation: Arc<dyn KeyRotation>,
     pub router: Arc<Router>,
     pub userpass: UserPassAuth,
     pub oidc: OidcAuthMethod,
@@ -138,11 +142,28 @@ pub fn engine_mounts() -> Vec<EngineMount> {
 
 pub async fn build(config: &Config) -> anyhow::Result<AppState> {
     let master_key = StaticMasterKeyProvider::from_env(&config.master_key_env)
-        .map_err(|_| anyhow::anyhow!("failed to load master key from {}", config.master_key_env))?;
-    let aead: Arc<dyn Aead> = Arc::new(Aes256GcmAead::new(&master_key.current_key()));
+        .map_err(|_| anyhow::anyhow!("failed to load master key from {}", config.master_key_env))?
+        .with_retired_from_env(&config.master_key_retired_env)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "failed to parse retired master keys from {}",
+                config.master_key_retired_env
+            )
+        })?;
+    let retired = master_key.retired_keys();
+    let aead: Arc<dyn Aead> = Arc::new(KeyRing::new(&master_key.current_key(), &retired));
 
     let raw_storage = PgStorage::connect(&config.storage_database_url).await?;
-    let storage: Arc<dyn StorageBackend> = Arc::new(Barrier::new(raw_storage, aead));
+    let barrier = Arc::new(Barrier::new(raw_storage, aead));
+    let storage: Arc<dyn StorageBackend> = barrier.clone();
+    let rotation: Arc<dyn KeyRotation> = barrier;
+    if !retired.is_empty() {
+        tracing::warn!(
+            retired = retired.len(),
+            active_key = %rotation.active_key_id(),
+            "running with retired master keys — POST /v1/sys/rewrap, then remove them"
+        );
+    }
 
     if let (Some(username), Some(password)) = (&config.bootstrap_username, &config.bootstrap_password) {
         bootstrap_admin(storage.as_ref(), username, password).await?;
@@ -158,6 +179,7 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
 
     Ok(AppState {
         storage,
+        rotation,
         router,
         userpass: UserPassAuth::new(),
         oidc: OidcAuthMethod::new(),

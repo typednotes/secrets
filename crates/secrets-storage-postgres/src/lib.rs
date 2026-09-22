@@ -85,6 +85,47 @@ impl StorageBackend for PgStorage {
         Ok(())
     }
 
+    /// Served by the partial index on `expires_at` from the initial
+    /// migration, so the reaper no longer reads every lease to find the few
+    /// that expired.
+    async fn list_expired(
+        &self,
+        prefix: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> StorageResult<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT path FROM kv_store
+             WHERE path LIKE $1 || '%' AND expires_at IS NOT NULL AND expires_at <= $2",
+        )
+        .bind(prefix)
+        .bind(now)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| StorageError::Backend(e.to_string()))?;
+        Ok(rows.into_iter().map(|(p,)| p).collect())
+    }
+
+    /// One statement, so the comparison and the write cannot be interleaved.
+    async fn replace_if_unchanged(
+        &self,
+        path: &str,
+        expected: &[u8],
+        entry: StorageEntry,
+    ) -> StorageResult<bool> {
+        let result = sqlx::query(
+            "UPDATE kv_store SET value = $3, expires_at = $4, updated_at = now()
+             WHERE path = $1 AND value = $2",
+        )
+        .bind(path)
+        .bind(expected)
+        .bind(entry.value)
+        .bind(entry.expires_at)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| StorageError::Backend(e.to_string()))?;
+        Ok(result.rows_affected() == 1)
+    }
+
     async fn try_acquire_lock(&self, key: &str) -> StorageResult<bool> {
         let mut locks = self.locks.lock().await;
         // Already leading. Re-taking the same advisory lock on the same

@@ -13,6 +13,11 @@ pub struct Config {
     /// a file containing it).
     #[serde(default = "default_master_key_env")]
     pub master_key_env: String,
+    /// Env var name holding comma-separated hex keys kept for *decryption
+    /// only*, so values written under a previous master key still open while
+    /// a rotation is in progress. Unset is normal.
+    #[serde(default = "default_master_key_retired_env")]
+    pub master_key_retired_env: String,
     /// If set (together with `bootstrap_password`) and the user does not
     /// already exist, creates an initial admin user with a full-access
     /// "root" policy on first startup.
@@ -29,6 +34,10 @@ fn default_listen_addr() -> String {
 
 fn default_master_key_env() -> String {
     "SECRETS_MASTER_KEY".to_string()
+}
+
+fn default_master_key_retired_env() -> String {
+    "SECRETS_MASTER_KEY_RETIRED".to_string()
 }
 
 fn default_lease_reap_interval_seconds() -> u64 {
