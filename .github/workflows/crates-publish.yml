@@ -23,17 +23,33 @@ jobs:
             exit 1
           fi
 
-      # secrets-core has no in-workspace dependencies; the other five all
-      # depend only on secrets-core, so it must land on crates.io first.
+      # secrets-core has no in-workspace dependencies and every other library
+      # crate depends only on it, so it must land on crates.io first.
+      #
+      # The list is derived from the workspace rather than hardcoded: it was a
+      # hardcoded list once, and it silently went stale the moment a batch of
+      # engine crates was added. secrets-server opts out via `publish = false`.
+      #
       # Each publish is skipped if that exact version is already live, so a
       # retry after a partial failure (e.g. crates.io rate limiting) is safe.
       - name: Publish library crates
         run: |
-          for crate in secrets-core secrets-storage-postgres secrets-engine-kv secrets-engine-postgres secrets-auth-userpass secrets-auth-oidc; do
-            version=$(cargo metadata --no-deps --format-version 1 | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          others=$(echo "$metadata" | jq -r '.packages[] | select(.publish != []) | .name' \
+            | sort | grep -vx secrets-core)
+          order=$(printf 'secrets-core\n%s\n' "$others")
+          echo "Publishing in order:" $order
+
+          # Read line by line rather than relying on unquoted word splitting,
+          # so the loop does not depend on the shell's IFS behaviour.
+          while read -r crate; do
+            [ -n "$crate" ] || continue
+            version=$(echo "$metadata" | jq -r ".packages[] | select(.name == \"$crate\") | .version")
             if curl -sf -A "secrets-publish-ci (https://github.com/typednotes/secrets)" "https://crates.io/api/v1/crates/$crate/$version" >/dev/null; then
               echo "$crate $version already published, skipping"
               continue
             fi
+            # cargo waits for the new version to appear in the index before
+            # returning, which is what lets the next crate depend on it.
             cargo publish -p "$crate" --locked
-          done
+          done <<< "$order"

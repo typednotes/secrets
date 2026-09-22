@@ -100,19 +100,19 @@ tokens, or policy evaluation.
 | `secrets-storage-postgres` | `StorageBackend` impl backed by a single `kv_store` table | [![docs.rs](https://img.shields.io/docsrs/secrets-storage-postgres)](https://docs.rs/secrets-storage-postgres) |
 | `secrets-engine-kv` | Versioned, soft-deleting static secrets | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-kv)](https://docs.rs/secrets-engine-kv) |
 | `secrets-engine-postgres` | Dynamic PostgreSQL credential generation/revocation | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-postgres)](https://docs.rs/secrets-engine-postgres) |
-| `secrets-engine-github` | GitHub App installation tokens — repo-scoped, revocable | — |
-| `secrets-engine-gitlab` | GitLab project/group access tokens | — |
-| `secrets-engine-aws` | STS assumed-role sessions and per-lease IAM users | — |
-| `secrets-engine-gcp` | Service-account impersonation, downscoped tokens, HMAC keys | — |
-| `secrets-engine-gworkspace` | Brokered Google OAuth access tokens, domain-wide delegation | — |
-| `secrets-engine-dropbox` | Brokered Dropbox OAuth access tokens | — |
-| `secrets-engine-m365` | Microsoft Graph client-credentials and federated identity | — |
-| `secrets-engine-federation` | Publishes provider trust config — stores no credential | — |
+| `secrets-engine-github` | GitHub App installation tokens — repo-scoped, revocable | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-github)](https://docs.rs/secrets-engine-github) |
+| `secrets-engine-gitlab` | GitLab project/group access tokens | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-gitlab)](https://docs.rs/secrets-engine-gitlab) |
+| `secrets-engine-aws` | STS assumed-role sessions and per-lease IAM users | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-aws)](https://docs.rs/secrets-engine-aws) |
+| `secrets-engine-gcp` | Service-account impersonation, downscoped tokens, HMAC keys | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-gcp)](https://docs.rs/secrets-engine-gcp) |
+| `secrets-engine-gworkspace` | Brokered Google OAuth access tokens, domain-wide delegation | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-gworkspace)](https://docs.rs/secrets-engine-gworkspace) |
+| `secrets-engine-dropbox` | Brokered Dropbox OAuth access tokens | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-dropbox)](https://docs.rs/secrets-engine-dropbox) |
+| `secrets-engine-m365` | Microsoft Graph client-credentials and federated identity | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-m365)](https://docs.rs/secrets-engine-m365) |
+| `secrets-engine-federation` | Publishes provider trust config — stores no credential | [![docs.rs](https://img.shields.io/docsrs/secrets-engine-federation)](https://docs.rs/secrets-engine-federation) |
 | `secrets-auth-userpass` | Argon2id username/password login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-userpass)](https://docs.rs/secrets-auth-userpass) |
 | `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-oidc)](https://docs.rs/secrets-auth-oidc) |
 | `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root | *(not published — see the [Docker image](#docker))* |
 
-The library crates above are published to [crates.io](https://crates.io/search?q=secrets-core), with docs auto-built on [docs.rs](https://docs.rs/secrets-core) on every release — see [`.github/workflows/crates-publish.yml`](.github/workflows/crates-publish.yml).
+Every library crate above is published to [crates.io](https://crates.io/search?q=secrets-core), with docs auto-built on [docs.rs](https://docs.rs/secrets-core) on every release — see [`.github/workflows/crates-publish.yml`](.github/workflows/crates-publish.yml). The publish list is derived from the workspace, so a new crate is released as soon as it exists; `secrets-server` opts out with `publish = false` and ships as a container image instead.
 
 ## Quick start
 

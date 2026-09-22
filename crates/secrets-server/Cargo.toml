@@ -3,6 +3,9 @@ name = "secrets-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Distributed as a container image, not on crates.io. This also keeps it out
+# of the release workflow's derived publish list.
+publish = false
 
 [[bin]]
 name = "secrets-server"
