@@ -152,6 +152,15 @@ export SECRETS_SERVER_BOOTSTRAP_PASSWORD=change-me
 cargo run -p secrets-server
 ```
 
+By default the server applies its own storage schema at startup. Set
+`SECRETS_SERVER_STORAGE_MIGRATE=false` when something else owns it — e.g. a
+deploy tool applying `crates/secrets-storage-postgres/src/migrations/*.sql`
+as a reviewed, declared history (`typednotes-infra` reads those files at a
+release tag). The server then only checks that `kv_store` exists, and fails
+at startup if it does not. Its database identity then needs no DDL rights.
+Don't switch an existing database between the two modes without reconciling
+`_sqlx_migrations` first.
+
 Config can also come from `secrets-server.toml` in the working directory;
 environment variables (prefixed `SECRETS_SERVER_`) take precedence. See
 `crates/secrets-server/src/config.rs` for every field and its default —

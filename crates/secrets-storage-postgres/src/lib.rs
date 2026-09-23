@@ -21,9 +21,44 @@ pub struct PgStorage {
 }
 
 impl PgStorage {
+    /// Connect and apply this crate's migrations (`src/migrations/`), the
+    /// behaviour every release before 1.1.0 had. Equivalent to
+    /// `connect_with(database_url, true)`.
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
+        Self::connect_with(database_url, true).await
+    }
+
+    /// Connect, applying the migrations only if `migrate` is true.
+    ///
+    /// `migrate = false` is for deployments where something else owns the
+    /// schema — `typednotes-infra` applies `src/migrations/` as a declared
+    /// history, so the SQL is reviewed in a plan before it runs and the
+    /// serving identity needs no DDL rights. The schema is then *checked*
+    /// rather than assumed: a missing `kv_store` fails here, at startup,
+    /// naming the cause, instead of as a confusing error on the first
+    /// request. Note that the two modes do not mix on one database: sqlx
+    /// records what it applied in `_sqlx_migrations`, an external runner does
+    /// not, so switching an existing database from one to the other means
+    /// reconciling that bookkeeping first.
+    pub async fn connect_with(database_url: &str, migrate: bool) -> Result<Self, sqlx::Error> {
         let pool = PgPool::connect(database_url).await?;
-        sqlx::migrate!("./src/migrations").run(&pool).await?;
+        if migrate {
+            sqlx::migrate!("./src/migrations").run(&pool).await?;
+        } else {
+            sqlx::query("SELECT 1 FROM kv_store LIMIT 0")
+                .execute(&pool)
+                .await
+                .map_err(|e| {
+                    sqlx::Error::Configuration(
+                        format!(
+                            "storage migrations are disabled, but the schema is not in \
+                             place ({e}); apply src/migrations/ externally first, or \
+                             enable migrations"
+                        )
+                        .into(),
+                    )
+                })?;
+        }
         Ok(Self {
             pool,
             locks: Mutex::new(HashMap::new()),

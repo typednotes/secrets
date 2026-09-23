@@ -153,7 +153,11 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
     let retired = master_key.retired_keys();
     let aead: Arc<dyn Aead> = Arc::new(KeyRing::new(&master_key.current_key(), &retired));
 
-    let raw_storage = PgStorage::connect(&config.storage_database_url).await?;
+    if !config.storage_migrate {
+        tracing::info!("storage migrations disabled; expecting the schema to be applied externally");
+    }
+    let raw_storage =
+        PgStorage::connect_with(&config.storage_database_url, config.storage_migrate).await?;
     let barrier = Arc::new(Barrier::new(raw_storage, aead));
     let storage: Arc<dyn StorageBackend> = barrier.clone();
     let rotation: Arc<dyn KeyRotation> = barrier;

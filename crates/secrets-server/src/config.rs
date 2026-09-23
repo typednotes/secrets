@@ -9,6 +9,13 @@ pub struct Config {
     pub listen_addr: String,
     /// Connection string for this server's own encrypted storage database.
     pub storage_database_url: String,
+    /// Whether to apply the storage schema's migrations at startup
+    /// (`SECRETS_SERVER_STORAGE_MIGRATE`). Defaults to `true`. Set it to
+    /// `false` when the schema is applied by something else — e.g. declared
+    /// in `typednotes-infra` — so the server only checks that `kv_store`
+    /// exists and its database identity needs no DDL rights.
+    #[serde(default = "default_storage_migrate")]
+    pub storage_migrate: bool,
     /// Env var name holding the hex-encoded 32-byte master key (or a path to
     /// a file containing it).
     #[serde(default = "default_master_key_env")]
@@ -30,6 +37,10 @@ pub struct Config {
 
 fn default_listen_addr() -> String {
     "0.0.0.0:8200".to_string()
+}
+
+fn default_storage_migrate() -> bool {
+    true
 }
 
 fn default_master_key_env() -> String {
