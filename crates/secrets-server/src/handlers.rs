@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -21,6 +22,10 @@ pub fn router(state: Arc<AppState>) -> AxumRouter {
     AxumRouter::new()
         .route("/v1/sys/health", get(health))
         .route("/v1/auth/userpass/login", post(userpass_login))
+        .route(
+            "/v1/auth/userpass/users/{username}",
+            get(read_user).post(write_user).delete(delete_user),
+        )
         .route("/v1/auth/oidc/config", post(oidc_config_write))
         .route("/v1/auth/oidc/authorize_url", get(oidc_authorize_url))
         .route("/v1/auth/oidc/callback", get(oidc_callback))
@@ -141,6 +146,84 @@ async fn userpass_login(
         Err(e) => return auth_error_response(e),
     };
     mint_token_response(&state, outcome).await
+}
+
+/// The capability path for managing one user. Per-user rather than one
+/// `auth/userpass/users` gate, so a policy can delegate a single identity
+/// (or a name prefix) without handing out every account including the admin.
+fn user_path(username: &str) -> String {
+    format!("auth/userpass/users/{username}")
+}
+
+#[derive(Deserialize)]
+struct WriteUserRequest {
+    password: String,
+    policies: Vec<String>,
+}
+
+/// Creates or replaces a user. The body is extracted as a `Result` so that a
+/// caller without `sudo` learns nothing from a malformed body, and a caller
+/// with it gets the same `{"error": ...}` 400 as for any other invalid
+/// input, rather than axum's plain-text 415/422.
+async fn write_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(username): Path<String>,
+    body: Result<Json<WriteUserRequest>, JsonRejection>,
+) -> Response {
+    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+        return resp;
+    }
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(rejection) => return err(StatusCode::BAD_REQUEST, rejection.body_text()),
+    };
+    match secrets_auth_userpass::UserPassAuth::upsert_user(
+        state.storage.as_ref(),
+        &username,
+        &body.password,
+        body.policies,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => auth_error_response(e),
+    }
+}
+
+/// Name and policies only — the hash never leaves the auth method.
+async fn read_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(username): Path<String>,
+) -> Response {
+    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+        return resp;
+    }
+    match secrets_auth_userpass::UserPassAuth::read_user(state.storage.as_ref(), &username).await {
+        Ok(Some(user)) => Json(user).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "user not found"),
+        Err(e) => auth_error_response(e),
+    }
+}
+
+/// Stops future logins. Tokens the user already holds are not revoked: they
+/// are not indexed by owner, so they keep working until they expire — an
+/// hour after login or after the holder's last `renew-self`, which has no
+/// maximum TTL.
+async fn delete_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(username): Path<String>,
+) -> Response {
+    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+        return resp;
+    }
+    match secrets_auth_userpass::UserPassAuth::delete_user(state.storage.as_ref(), &username).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "user not found"),
+        Err(e) => auth_error_response(e),
+    }
 }
 
 async fn mint_token_response(
@@ -546,6 +629,9 @@ async fn sys_help(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Res
         "operations": {
             "GET /v1/sys/rewrap": "which master key this replica seals with (sudo)",
             "POST /v1/sys/rewrap": "re-encrypt every stored value under the active master key (sudo)",
+            "POST /v1/auth/userpass/users/{username}": "create or replace a user: {\"password\", \"policies\"} (sudo on auth/userpass/users/{username})",
+            "GET /v1/auth/userpass/users/{username}": "a user's name and policies, never its hash (sudo on auth/userpass/users/{username})",
+            "DELETE /v1/auth/userpass/users/{username}": "delete a user; tokens already issued stay valid until they expire (sudo on auth/userpass/users/{username})",
         },
         "conventions": {
             "{mount}/config/{name}": "operator: the provider connection and root credential (sudo)",
@@ -1081,6 +1167,110 @@ mod tests {
         let response =
             engine_help(State(state.clone()), headers, Path("nope".to_string())).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    fn user_body(password: &str, policies: &[&str]) -> Result<Json<WriteUserRequest>, JsonRejection> {
+        Ok(Json(WriteUserRequest {
+            password: password.to_string(),
+            policies: policies.iter().map(|p| p.to_string()).collect(),
+        }))
+    }
+
+    #[tokio::test]
+    async fn user_management_round_trip() {
+        let state = test_state();
+        let headers = sudo(&state).await;
+        let name = || Path("svc".to_string());
+
+        let response = write_user(
+            State(state.clone()),
+            headers.clone(),
+            name(),
+            user_body("a long enough password", &["svc-policy"]),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = read_user(State(state.clone()), headers.clone(), name()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        assert_eq!(body, json!({ "username": "svc", "policies": ["svc-policy"] }));
+
+        let response = delete_user(State(state.clone()), headers.clone(), name()).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = delete_user(State(state.clone()), headers.clone(), name()).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = read_user(State(state), headers, name()).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// The capability is checked before anything else, so an unauthorised
+    /// caller cannot probe which users exist or which inputs are valid.
+    #[tokio::test]
+    async fn user_management_requires_sudo_on_the_user_path() {
+        let state = test_state();
+        let no_caps = authenticated(&state).await;
+        let name = || Path("svc".to_string());
+
+        let write = write_user(State(state.clone()), no_caps.clone(), name(), user_body("x", &[])).await;
+        assert_eq!(write.status(), StatusCode::FORBIDDEN);
+        let read = read_user(State(state.clone()), no_caps.clone(), name()).await;
+        assert_eq!(read.status(), StatusCode::FORBIDDEN);
+        let delete = delete_user(State(state.clone()), no_caps, name()).await;
+        assert_eq!(delete.status(), StatusCode::FORBIDDEN);
+
+        let anonymous = read_user(State(state.clone()), HeaderMap::new(), name()).await;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+        // Sudo scoped to one user's path grants that user and no other.
+        let scoped = secrets_core::policy::Policy {
+            name: "root".to_string(),
+            rules: vec![secrets_core::policy::PathRule {
+                prefix: "auth/userpass/users/svc".to_string(),
+                capabilities: vec![Capability::Sudo],
+            }],
+        };
+        secrets_core::policy::store_policy(state.storage.as_ref(), &scoped)
+            .await
+            .unwrap();
+        let headers = authenticated(&state).await;
+        let own = read_user(State(state.clone()), headers.clone(), name()).await;
+        assert_eq!(own.status(), StatusCode::NOT_FOUND);
+        let other = read_user(State(state), headers, Path("admin".to_string())).await;
+        assert_eq!(other.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn invalid_user_writes_are_bad_requests() {
+        let state = test_state();
+        let headers = sudo(&state).await;
+        for (username, password, policies) in [
+            (".dot", "a long enough password", vec![]),
+            ("has space", "a long enough password", vec![]),
+            ("svc", "short", vec![]),
+            ("svc", "a long enough password", vec![""]),
+        ] {
+            let response = write_user(
+                State(state.clone()),
+                headers.clone(),
+                Path(username.to_string()),
+                user_body(password, &policies),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{username}/{password}");
+            assert!(body_json(response).await["error"].is_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn sys_help_lists_the_user_routes() {
+        let state = test_state();
+        let headers = authenticated(&state).await;
+        let body = body_json(sys_help(State(state), headers).await).await;
+        for method in ["POST", "GET", "DELETE"] {
+            let key = format!("{method} /v1/auth/userpass/users/{{username}}");
+            assert!(body["operations"][&key].is_string(), "{key} missing");
+        }
     }
 
     /// Engines that cannot revoke must say so in words, not just in a boolean.

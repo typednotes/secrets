@@ -53,7 +53,10 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
   it. Three of the seven providers cannot revoke an issued token, and the API
   says so rather than implying a guarantee it cannot keep.
 - **Auth methods**:
-  - `userpass` — Argon2id-hashed username/password.
+  - `userpass` — Argon2id-hashed username/password. Users are managed over
+    HTTP (`/v1/auth/userpass/users/{username}`), so each service can log in
+    as its own scoped identity instead of sharing the bootstrap admin — see
+    [Userpass users](#userpass-users).
   - `oidc` — both interactive human login (authorization-code + PKCE) and
     machine-to-machine login (hand us a JWT, we verify it against the IdP's
     JWKS). Both share one discovery/JWKS cache and one claims-to-policies
@@ -245,6 +248,7 @@ Notes that matter:
 GET   /v1/sys/health
 
 POST  /v1/auth/userpass/login
+GET/POST/DELETE /v1/auth/userpass/users/{username}   # manage users (Sudo)
 POST  /v1/auth/oidc/config              # Sudo — register the IdP
 GET   /v1/auth/oidc/authorize_url       # start interactive login
 GET   /v1/auth/oidc/callback            # IdP redirects back here
@@ -281,6 +285,44 @@ credential is worth.
 routes. `{mount}/config/{target}` is write-only: a `GET` reports whether it is
 configured but never returns the document, because it holds the root
 credential.
+
+### Userpass users
+
+The bootstrap admin is for operators. Services get their own identity,
+holding only the policies they need:
+
+```bash
+# a policy, then a user holding only it
+curl -s -X POST localhost:8200/v1/sys/policy/liaison -H "Authorization: Bearer $TOKEN" \
+  -d '{"name": "liaison", "rules": [{"prefix": "secret/data/thirdparty/", "capabilities": ["read", "create"]}]}'
+curl -s -X POST localhost:8200/v1/auth/userpass/users/liaison -H "Authorization: Bearer $TOKEN" \
+  -d '{"password": "'"$(openssl rand -hex 24)"'", "policies": ["liaison"]}'
+
+curl -s localhost:8200/v1/auth/userpass/users/liaison -H "Authorization: Bearer $TOKEN"
+# => {"username": "liaison", "policies": ["liaison"]}
+```
+
+| Request | Result |
+|---|---|
+| `POST /v1/auth/userpass/users/{username}` `{"password": "...", "policies": ["..."]}` | `204`. Creates the user, or **replaces** it: the password is re-hashed (Argon2id) and the policy list swapped, not merged. |
+| `GET /v1/auth/userpass/users/{username}` | `200` `{"username", "policies"}` — never the hash. `404` if absent. |
+| `DELETE /v1/auth/userpass/users/{username}` | `204`, or `404` if absent. |
+
+- Each needs a token with `sudo` on `auth/userpass/users/{username}` —
+  per user, so a policy can delegate one identity (or a name prefix) without
+  handing out the admin account. Missing token `401`, invalid or denied `403`,
+  as everywhere else.
+- Invalid input is a `400` with `{"error": ...}`: the username must be 1–64
+  characters of `[A-Za-z0-9_.-]` not starting with `.`; the password at least
+  12 characters; `policies` an array (possibly empty) of non-empty names.
+  The bootstrap user is written from config without these rules, so an
+  existing deployment's admin keeps working.
+- **Deleting or replacing a user does not revoke tokens it already holds.**
+  Tokens are not indexed by owner, so they keep working, with the policies
+  they were minted with, until they expire — one hour after login, or after
+  the holder's last `renew-self`, which has no maximum TTL. Delete the policy
+  too if access must stop immediately: policies are resolved on every
+  request.
 
 ### Example: dynamic PostgreSQL credentials
 
@@ -320,7 +362,9 @@ cargo test --workspace --lib --bins
 ```
 
 Unit tests cover crypto round-trip/tamper-detection, policy evaluation,
-KV versioning/soft-delete, the lease reaper (including cascade-revoke on
+KV versioning/soft-delete, userpass user management (create/replace/
+delete, the hash never leaving the crate, input validation, the per-user
+`sudo` check), the lease reaper (including cascade-revoke on
 token revocation), SQL-template substitution and username/password
 character-set safety, and OIDC claims-to-policy mapping / PKCE challenge
 generation — all against in-memory fakes, no live Postgres or IdP needed.
@@ -363,10 +407,13 @@ again without `SECRETS_TEST_USERNAME`/`SECRETS_TEST_PASSWORD`. Coverage:
 health, the unauthenticated surface (401/403 shapes, malformed bodies,
 unknown routes), token lifecycle (login/lookup/renew/revoke), the KV engine
 (round-trip, versioning, listing, unicode, concurrent writes), policy CRUD,
-and the database-engine/lease error paths.
+userpass user management (a scoped user logs in with exactly its policies,
+is allowed under its prefix and denied elsewhere; replace, delete, the
+`sudo` requirement and input validation), and the database-engine/lease
+error paths.
 
 They are safe to point at a live deployment: each test namespaces its
-secrets under `secret/data/itest/<uuid>/` and its policies under
+secrets under `secret/data/itest/<uuid>/` and its policies and users under
 `itest-<uuid>`, cleans up afterwards, and never touches the token it was
 not issued. The suite also goes easy on the server — `userpass` login is
 deliberately expensive (Argon2id), so one login is shared across tests and

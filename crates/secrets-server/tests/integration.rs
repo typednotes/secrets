@@ -613,6 +613,237 @@ async fn policy_read_of_unknown_name_is_not_found() {
 }
 
 // ---------------------------------------------------------------------------
+// Userpass user management
+// ---------------------------------------------------------------------------
+
+/// A scoped service identity created by the admin. Each test cleans it up at
+/// the end; a failing assertion skips that, but the names are unique, so a
+/// leftover never collides with a later run.
+struct ScopedUser {
+    username: String,
+    password: String,
+    policy: String,
+    prefix: String,
+}
+
+impl ScopedUser {
+    /// A policy granting `create`/`read`/`delete` under a fresh
+    /// `secret/data/itest/<uuid>/` prefix, and a user holding only it.
+    async fn create(server: &Server, admin: &str) -> Self {
+        let id = Uuid::new_v4();
+        let user = Self {
+            username: format!("itest-{id}"),
+            password: format!("pw-{}", Uuid::new_v4()),
+            policy: format!("itest-{id}"),
+            prefix: format!("itest/{id}"),
+        };
+        let (status, body) = server
+            .post(
+                &format!("/v1/sys/policy/{}", user.policy),
+                Some(admin),
+                &json!({
+                    "name": user.policy,
+                    "rules": [{
+                        "prefix": format!("secret/data/{}/", user.prefix),
+                        "capabilities": ["create", "read", "delete"],
+                    }],
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        let (status, body) = server
+            .post(
+                &user.url(),
+                Some(admin),
+                &json!({ "password": user.password, "policies": [user.policy] }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        user
+    }
+
+    fn url(&self) -> String {
+        format!("/v1/auth/userpass/users/{}", self.username)
+    }
+
+    async fn login(&self, server: &Server, password: &str) -> (StatusCode, Value) {
+        server
+            .post(
+                "/v1/auth/userpass/login",
+                None,
+                &json!({ "username": self.username, "password": password }),
+            )
+            .await
+    }
+
+    async fn cleanup(&self, server: &Server, admin: &str) {
+        server.delete(&self.url(), Some(admin)).await;
+        server
+            .delete(&format!("/v1/sys/policy/{}", self.policy), Some(admin))
+            .await;
+    }
+}
+
+/// The point of the feature: a service gets its own identity, holding exactly
+/// the policies it was given, allowed under its prefix and denied elsewhere.
+#[tokio::test]
+async fn created_user_logs_in_with_exactly_its_scoped_policies() {
+    let (server, admin) = authed_server!();
+    let user = ScopedUser::create(&server, admin).await;
+
+    let (status, body) = user.login(&server, &user.password).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["auth"]["policies"], json!([user.policy]));
+    assert_eq!(body["auth"]["display_name"], user.username);
+    let token = body["auth"]["client_token"].as_str().unwrap().to_string();
+
+    let allowed = format!("{}/secret", user.prefix);
+    let (status, body) = server
+        .post(&data_url(&allowed), Some(&token), &json!({ "k": "v" }))
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, body) = server.get(&data_url(&allowed), Some(&token)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["k"], "v");
+
+    let elsewhere = scratch_path("not-yours");
+    let (status, _) = server
+        .post(&data_url(&elsewhere), Some(&token), &json!({ "k": "v" }))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = server
+        .get(&format!("/v1/sys/policy/{}", user.policy), Some(&token))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    server.delete(&data_url(&allowed), Some(&token)).await;
+    server.post("/v1/auth/token/revoke-self", Some(&token), &json!({})).await;
+    user.cleanup(&server, admin).await;
+}
+
+#[tokio::test]
+async fn reading_a_user_returns_its_policies_and_never_the_hash() {
+    let (server, admin) = authed_server!();
+    let user = ScopedUser::create(&server, admin).await;
+
+    let (status, body) = server.get(&user.url(), Some(admin)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        json!({ "username": user.username, "policies": [user.policy] })
+    );
+    let raw = body.to_string();
+    assert!(!raw.contains("hash") && !raw.contains("argon2"), "leaked: {raw}");
+    assert!(!raw.contains(&user.password), "leaked the password: {raw}");
+
+    user.cleanup(&server, admin).await;
+}
+
+/// POST replaces: the old password stops working and the new one logs in
+/// with the new policy list.
+#[tokio::test]
+async fn replacing_a_user_changes_its_password_and_policies() {
+    let (server, admin) = authed_server!();
+    let user = ScopedUser::create(&server, admin).await;
+
+    let new_password = format!("pw-{}", Uuid::new_v4());
+    let (status, body) = server
+        .post(
+            &user.url(),
+            Some(admin),
+            &json!({ "password": new_password, "policies": [] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let (status, _) = user.login(&server, &user.password).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "the old password still works");
+    let (status, body) = user.login(&server, &new_password).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["auth"]["policies"], json!([]));
+    let token = body["auth"]["client_token"].as_str().unwrap();
+    server.post("/v1/auth/token/revoke-self", Some(token), &json!({})).await;
+
+    user.cleanup(&server, admin).await;
+}
+
+#[tokio::test]
+async fn deleting_a_user_stops_its_logins() {
+    let (server, admin) = authed_server!();
+    let user = ScopedUser::create(&server, admin).await;
+
+    let (status, _) = server.delete(&user.url(), Some(admin)).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = user.login(&server, &user.password).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, _) = server.get(&user.url(), Some(admin)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = server.delete(&user.url(), Some(admin)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    user.cleanup(&server, admin).await;
+}
+
+/// A token without `sudo` on the user's path must not be able to mint
+/// itself — or anyone — a new identity.
+#[tokio::test]
+async fn user_endpoints_require_sudo() {
+    let (server, admin) = authed_server!();
+    let user = ScopedUser::create(&server, admin).await;
+    let (status, body) = user.login(&server, &user.password).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let token = body["auth"]["client_token"].as_str().unwrap().to_string();
+
+    let target = format!("/v1/auth/userpass/users/itest-{}", Uuid::new_v4());
+    let (status, _) = server
+        .post(
+            &target,
+            Some(&token),
+            &json!({ "password": "a long enough password", "policies": ["root"] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = server.get(&user.url(), Some(&token)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = server.delete(&user.url(), Some(&token)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = server.get(&user.url(), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = server.get(&user.url(), Some("s.0000deadbeef")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    server.post("/v1/auth/token/revoke-self", Some(&token), &json!({})).await;
+    user.cleanup(&server, admin).await;
+}
+
+#[tokio::test]
+async fn invalid_user_writes_are_bad_requests() {
+    let (server, admin) = authed_server!();
+    let ok_name = format!("itest-{}", Uuid::new_v4());
+    let cases = [
+        (format!(".itest-{}", Uuid::new_v4()), json!({ "password": "a long enough password", "policies": [] })),
+        (format!("itest-{}", "x".repeat(64)), json!({ "password": "a long enough password", "policies": [] })),
+        (ok_name.clone(), json!({ "password": "short", "policies": [] })),
+        (ok_name.clone(), json!({ "password": "a long enough password", "policies": [""] })),
+        (ok_name.clone(), json!({ "password": "a long enough password", "policies": "root" })),
+        (ok_name.clone(), json!({ "password": "a long enough password" })),
+    ];
+    for (username, body) in cases {
+        let (status, response) = server
+            .post(&format!("/v1/auth/userpass/users/{username}"), Some(admin), &body)
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{username} {body}: {response}");
+        assert!(response["error"].is_string(), "{response}");
+    }
+    let (status, _) = server
+        .get(&format!("/v1/auth/userpass/users/{ok_name}"), Some(admin))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "an invalid write created the user");
+}
+
+// ---------------------------------------------------------------------------
 // Database engine and leases
 // ---------------------------------------------------------------------------
 

@@ -44,7 +44,8 @@ flowchart LR
 ```
 
 The consumer authenticates as *itself* (an OIDC workload token, or a
-`userpass` identity), policy decides which providers and which scopes it may
+`userpass` identity of its own — see [Userpass
+users](../../README.md#userpass-users)), policy decides which providers and which scopes it may
 reach, and what it receives expires on its own. The server keeps the only
 durable secret, in one place, encrypted, with one audit trail.
 
