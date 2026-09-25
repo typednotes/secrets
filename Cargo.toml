@@ -19,26 +19,26 @@ members = [
 ]
 
 [workspace.package]
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/typednotes/secrets"
 
 [workspace.dependencies]
-secrets-core = { path = "crates/secrets-core", version = "1.2.0" }
-secrets-storage-postgres = { path = "crates/secrets-storage-postgres", version = "1.2.0" }
-secrets-engine-kv = { path = "crates/secrets-engine-kv", version = "1.2.0" }
-secrets-engine-postgres = { path = "crates/secrets-engine-postgres", version = "1.2.0" }
-secrets-engine-github = { path = "crates/secrets-engine-github", version = "1.2.0" }
-secrets-engine-gitlab = { path = "crates/secrets-engine-gitlab", version = "1.2.0" }
-secrets-engine-aws = { path = "crates/secrets-engine-aws", version = "1.2.0" }
-secrets-engine-gcp = { path = "crates/secrets-engine-gcp", version = "1.2.0" }
-secrets-engine-gworkspace = { path = "crates/secrets-engine-gworkspace", version = "1.2.0" }
-secrets-engine-dropbox = { path = "crates/secrets-engine-dropbox", version = "1.2.0" }
-secrets-engine-m365 = { path = "crates/secrets-engine-m365", version = "1.2.0" }
-secrets-engine-federation = { path = "crates/secrets-engine-federation", version = "1.2.0" }
-secrets-auth-userpass = { path = "crates/secrets-auth-userpass", version = "1.2.0" }
-secrets-auth-oidc = { path = "crates/secrets-auth-oidc", version = "1.2.0" }
+secrets-core = { path = "crates/secrets-core", version = "1.3.0" }
+secrets-storage-postgres = { path = "crates/secrets-storage-postgres", version = "1.3.0" }
+secrets-engine-kv = { path = "crates/secrets-engine-kv", version = "1.3.0" }
+secrets-engine-postgres = { path = "crates/secrets-engine-postgres", version = "1.3.0" }
+secrets-engine-github = { path = "crates/secrets-engine-github", version = "1.3.0" }
+secrets-engine-gitlab = { path = "crates/secrets-engine-gitlab", version = "1.3.0" }
+secrets-engine-aws = { path = "crates/secrets-engine-aws", version = "1.3.0" }
+secrets-engine-gcp = { path = "crates/secrets-engine-gcp", version = "1.3.0" }
+secrets-engine-gworkspace = { path = "crates/secrets-engine-gworkspace", version = "1.3.0" }
+secrets-engine-dropbox = { path = "crates/secrets-engine-dropbox", version = "1.3.0" }
+secrets-engine-m365 = { path = "crates/secrets-engine-m365", version = "1.3.0" }
+secrets-engine-federation = { path = "crates/secrets-engine-federation", version = "1.3.0" }
+secrets-auth-userpass = { path = "crates/secrets-auth-userpass", version = "1.3.0" }
+secrets-auth-oidc = { path = "crates/secrets-auth-oidc", version = "1.3.0" }
 
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"

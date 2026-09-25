@@ -12,9 +12,9 @@ use secrets_engine_kv::KvEngine;
 use secrets_engine_postgres::PostgresEngine;
 use secrets_storage_postgres::PgStorage;
 
-use crate::config::Config;
+use crate::config::{Config, ServiceIdentity};
 
-const ROOT_POLICY_NAME: &str = "root";
+pub const ROOT_POLICY_NAME: &str = "root";
 
 /// Application state shared across HTTP handlers. This is the single place
 /// storage backends, secrets engines, and auth methods get constructed and
@@ -172,6 +172,7 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
     if let (Some(username), Some(password)) = (&config.bootstrap_username, &config.bootstrap_password) {
         bootstrap_admin(storage.as_ref(), username, password).await?;
     }
+    apply_service_identities(storage.as_ref(), &config.service_identities).await?;
 
     let router = Arc::new(Router::new(engine_mounts()));
 
@@ -217,4 +218,141 @@ async fn bootstrap_admin(
     UserPassAuth::create_user(storage, username, password, vec![ROOT_POLICY_NAME.to_string()]).await?;
     tracing::info!(username, "bootstrapped initial admin user");
     Ok(())
+}
+
+/// Makes each declared service identity exist exactly as configured: its
+/// policy (named after it) is rewritten, and its user is written only if
+/// the password or policy list differ. Runs on every start, so the services
+/// that depend on this server need no out-of-band setup, and rotating a
+/// password is a restart with the new value.
+async fn apply_service_identities(
+    storage: &dyn StorageBackend,
+    identities: &[ServiceIdentity],
+) -> anyhow::Result<()> {
+    for identity in identities {
+        let name = &identity.username;
+        let policy = Policy {
+            name: name.clone(),
+            rules: identity.rules.clone(),
+        };
+        policy::store_policy(storage, &policy).await?;
+        let written =
+            UserPassAuth::ensure_user(storage, name, &identity.password()?, vec![name.clone()])
+                .await
+                .map_err(|e| anyhow::anyhow!("service identity '{name}': {e}"))?;
+        tracing::info!(
+            username = %name,
+            "service identity {}",
+            if written { "written" } else { "unchanged" }
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use secrets_core::auth::{AuthMethod, LoginRequest};
+    use secrets_core::storage::{StorageEntry, StorageResult};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemStorage(Mutex<HashMap<String, StorageEntry>>);
+
+    #[async_trait]
+    impl StorageBackend for MemStorage {
+        async fn get(&self, path: &str) -> StorageResult<Option<StorageEntry>> {
+            Ok(self.0.lock().unwrap().get(path).cloned())
+        }
+        async fn put(&self, path: &str, entry: StorageEntry) -> StorageResult<()> {
+            self.0.lock().unwrap().insert(path.to_string(), entry);
+            Ok(())
+        }
+        async fn delete(&self, path: &str) -> StorageResult<()> {
+            self.0.lock().unwrap().remove(path);
+            Ok(())
+        }
+        async fn list(&self, prefix: &str) -> StorageResult<Vec<String>> {
+            let map = self.0.lock().unwrap();
+            Ok(map.keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+        }
+    }
+
+    fn identity(username: &str, password_env: &str, caps: Vec<Capability>) -> ServiceIdentity {
+        ServiceIdentity {
+            username: username.into(),
+            password_env: password_env.into(),
+            rules: vec![PathRule {
+                prefix: "secret/data/thirdparty/".into(),
+                capabilities: caps,
+            }],
+        }
+    }
+
+    async fn login(storage: &MemStorage, username: &str, password: &str) -> Option<Vec<String>> {
+        UserPassAuth::new()
+            .login(
+                storage,
+                LoginRequest::UserPass {
+                    username: username.into(),
+                    password: password.into(),
+                },
+            )
+            .await
+            .ok()
+            .map(|o| o.policies)
+    }
+
+    /// The identity can log in, holds only its own policy, and that policy
+    /// grants exactly the declared rules; a second start changes nothing and
+    /// a rotated password replaces the old one.
+    #[tokio::test]
+    async fn service_identities_are_applied_on_every_start() {
+        const ENV: &str = "SECRETS_TEST_WIRING_APP_PW";
+        let storage = MemStorage::default();
+        let identities = [identity("typednotes-app", ENV, vec![Capability::Create, Capability::Delete])];
+
+        // SAFETY: this test is the only reader and writer of this variable.
+        unsafe { std::env::set_var(ENV, "first password, long enough") };
+        apply_service_identities(&storage, &identities).await.unwrap();
+        assert_eq!(
+            login(&storage, "typednotes-app", "first password, long enough").await,
+            Some(vec!["typednotes-app".to_string()])
+        );
+        let policy = policy::get_policy(&storage, "typednotes-app").await.unwrap().unwrap();
+        assert!(policy.is_allowed("secret/data/thirdparty/gdrive/u/c", Capability::Create));
+        assert!(!policy.is_allowed("secret/data/thirdparty/gdrive/u/c", Capability::Read));
+
+        let user_key = "auth/userpass/users/typednotes-app";
+        let before = storage.0.lock().unwrap()[user_key].value.clone();
+        apply_service_identities(&storage, &identities).await.unwrap();
+        assert_eq!(storage.0.lock().unwrap()[user_key].value, before);
+
+        unsafe { std::env::set_var(ENV, "rotated password, long enough") };
+        apply_service_identities(&storage, &identities).await.unwrap();
+        assert_eq!(login(&storage, "typednotes-app", "first password, long enough").await, None);
+        assert!(login(&storage, "typednotes-app", "rotated password, long enough").await.is_some());
+        unsafe { std::env::remove_var(ENV) };
+    }
+
+    /// Declared identities coexist with the admin, whose root policy they
+    /// cannot touch.
+    #[tokio::test]
+    async fn service_identities_leave_the_admin_alone() {
+        const ENV: &str = "SECRETS_TEST_WIRING_LIAISON_PW";
+        let storage = MemStorage::default();
+        bootstrap_admin(&storage, "admin", "change-me").await.unwrap();
+        // SAFETY: this test is the only reader and writer of this variable.
+        unsafe { std::env::set_var(ENV, "liaison password, long enough") };
+        apply_service_identities(&storage, &[identity("liaison", ENV, vec![Capability::Read])])
+            .await
+            .unwrap();
+        unsafe { std::env::remove_var(ENV) };
+
+        assert_eq!(login(&storage, "admin", "change-me").await, Some(vec![ROOT_POLICY_NAME.to_string()]));
+        let root = policy::get_policy(&storage, ROOT_POLICY_NAME).await.unwrap().unwrap();
+        assert!(root.is_allowed("anything", Capability::Sudo));
+    }
 }

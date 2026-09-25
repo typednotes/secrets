@@ -302,6 +302,35 @@ curl -s localhost:8200/v1/auth/userpass/users/liaison -H "Authorization: Bearer 
 # => {"username": "liaison", "policies": ["liaison"]}
 ```
 
+#### Declaring service identities in config
+
+Instead of those two calls, a deployment can declare its services' identities
+and have the server apply them **on every start** — no admin login or
+out-of-band script. Each entry becomes a policy named after the user holding
+exactly `rules`, and a user holding only that policy. The password is never in
+the list, only the name of the env var that holds it:
+
+```bash
+export SECRETS_SERVER_SERVICE_IDENTITIES='[
+  {username="liaison", password_env="LIAISON_PASSWORD",
+   rules=[{prefix="secret/data/thirdparty/", capabilities=["read","create"]}]},
+  {username="typednotes-app", password_env="APP_PASSWORD",
+   rules=[{prefix="secret/data/thirdparty/", capabilities=["create","delete"]}]}]'
+export LIAISON_PASSWORD=$(openssl rand -base64 32) APP_PASSWORD=$(openssl rand -base64 32)
+```
+
+(or `[[service_identities]]` tables in `secrets-server.toml`).
+
+- A user that already matches is left untouched; a changed password or rule
+  list is written, so **rotation is a restart with the new value**.
+- The server refuses to start if a password env var is unset or shorter than
+  12 characters, a name is invalid or declared twice, or an identity would
+  replace the bootstrap admin or its `root` policy. Errors name the identity,
+  never the password.
+- Removing an entry does not delete the identity: `DELETE` it over HTTP.
+- As with every replace, tokens already issued keep their policies until they
+  expire.
+
 | Request | Result |
 |---|---|
 | `POST /v1/auth/userpass/users/{username}` `{"password": "...", "policies": ["..."]}` | `204`. Creates the user, or **replaces** it: the password is re-hashed (Argon2id) and the policy list swapped, not merged. |

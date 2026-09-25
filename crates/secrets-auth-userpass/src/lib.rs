@@ -89,6 +89,33 @@ impl UserPassAuth {
         put_user(storage, username, password, policies).await
     }
 
+    /// Makes the user exist with exactly this password and these policies,
+    /// under the same rules as [`Self::upsert_user`], and reports whether it
+    /// had to write anything.
+    ///
+    /// This is the declarative path — configuration applied on every start —
+    /// so it leaves a user that already matches untouched rather than
+    /// re-hashing under a fresh salt each time: a restart is then a no-op,
+    /// and a changed password or policy list takes effect on the next one.
+    pub async fn ensure_user(
+        storage: &dyn StorageBackend,
+        username: &str,
+        password: &str,
+        policies: Vec<String>,
+    ) -> AuthResult<bool> {
+        validate_username(username)?;
+        validate_password(password)?;
+        validate_policies(&policies)?;
+        if let Some(record) = get_record(storage, username).await?
+            && record.policies == policies
+            && verify(&record.password_hash, password)?
+        {
+            return Ok(false);
+        }
+        put_user(storage, username, password, policies).await?;
+        Ok(true)
+    }
+
     /// The user's name and policies, or `None` if there is no such user.
     /// Never the hash: nothing outside `login` has any use for it.
     pub async fn read_user(
@@ -166,6 +193,15 @@ pub fn validate_policies(policies: &[String]) -> AuthResult<()> {
     Ok(())
 }
 
+/// Whether `password` matches the stored Argon2 hash. A hash that does not
+/// parse is an error, not a mismatch: it means the record is corrupt.
+fn verify(password_hash: &str, password: &str) -> AuthResult<bool> {
+    let hash = PasswordHash::new(password_hash).map_err(|e| AuthError::Other(e.to_string()))?;
+    Ok(Argon2::default()
+        .verify_password(password.as_bytes(), &hash)
+        .is_ok())
+}
+
 fn user_key(username: &str) -> String {
     format!("{USER_PREFIX}{username}")
 }
@@ -218,11 +254,9 @@ impl AuthMethod for UserPassAuth {
             .await?
             .ok_or(AuthError::InvalidCredentials)?;
 
-        let hash = PasswordHash::new(&record.password_hash)
-            .map_err(|e| AuthError::Other(e.to_string()))?;
-        Argon2::default()
-            .verify_password(password.as_bytes(), &hash)
-            .map_err(|_| AuthError::InvalidCredentials)?;
+        if !verify(&record.password_hash, &password)? {
+            return Err(AuthError::InvalidCredentials);
+        }
 
         Ok(AuthOutcome {
             policies: record.policies,
@@ -366,6 +400,40 @@ mod tests {
             .unwrap();
         let outcome = login(&storage, "admin@example.com", "change-me").await.unwrap();
         assert_eq!(outcome.policies, names(&["root"]));
+    }
+
+    /// A matching user is left alone (same stored hash, so no re-salting);
+    /// a changed password or policy list is written and takes effect.
+    #[tokio::test]
+    async fn ensure_user_writes_only_what_differs() {
+        let storage = MemStorage::default();
+        let stored = |s: &MemStorage| {
+            s.0.lock().unwrap()["auth/userpass/users/app"].value.clone()
+        };
+
+        assert!(UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"])).await.unwrap());
+        let first = stored(&storage);
+        assert!(!UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"])).await.unwrap());
+        assert_eq!(stored(&storage), first, "an unchanged user was rewritten");
+
+        assert!(UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["q"])).await.unwrap());
+        assert_eq!(login(&storage, "app", PASSWORD).await.unwrap().policies, names(&["q"]));
+
+        let rotated = "a rotated long password";
+        assert!(UserPassAuth::ensure_user(&storage, "app", rotated, names(&["q"])).await.unwrap());
+        assert!(matches!(
+            login(&storage, "app", PASSWORD).await,
+            Err(AuthError::InvalidCredentials)
+        ));
+        assert!(login(&storage, "app", rotated).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn ensure_user_validates_like_upsert() {
+        let storage = MemStorage::default();
+        let result = UserPassAuth::ensure_user(&storage, "app", "too short", vec![]).await;
+        assert!(matches!(result, Err(AuthError::InvalidRequest(_))));
+        assert!(storage.0.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

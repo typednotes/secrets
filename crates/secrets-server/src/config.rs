@@ -1,6 +1,9 @@
 use figment::providers::{Env, Format, Toml};
 use figment::Figment;
+use secrets_core::policy::PathRule;
 use serde::Deserialize;
+
+use crate::wiring::ROOT_POLICY_NAME;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -30,9 +33,44 @@ pub struct Config {
     /// "root" policy on first startup.
     pub bootstrap_username: Option<String>,
     pub bootstrap_password: Option<String>,
+    /// Userpass identities for the services that use this server, applied on
+    /// **every** start (`SECRETS_SERVER_SERVICE_IDENTITIES`). Each gets a
+    /// policy named after it holding exactly `rules`, and a user holding only
+    /// that policy, whose password is read from the env var `password_env`.
+    /// Unlike the bootstrap admin, a changed password or rule list takes
+    /// effect on the next restart. An identity removed from this list is
+    /// left in place: delete it over HTTP.
+    #[serde(default)]
+    pub service_identities: Vec<ServiceIdentity>,
     /// How often the background reaper scans for expired leases.
     #[serde(default = "default_lease_reap_interval_seconds")]
     pub lease_reap_interval_seconds: u64,
+}
+
+/// One service's userpass identity, declared in config. The password itself
+/// never appears here — the list is plain configuration — only the name of
+/// the env var that holds it, as for the master key.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServiceIdentity {
+    pub username: String,
+    pub password_env: String,
+    pub rules: Vec<PathRule>,
+}
+
+impl ServiceIdentity {
+    /// The password from `password_env`, required and non-empty.
+    pub fn password(&self) -> anyhow::Result<String> {
+        std::env::var(&self.password_env)
+            .ok()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "service identity '{}': {} is not set",
+                    self.username,
+                    self.password_env
+                )
+            })
+    }
 }
 
 fn default_listen_addr() -> String {
@@ -86,6 +124,120 @@ impl Config {
             anyhow::bail!("bootstrap_username and bootstrap_password must be set together");
         }
 
+        let mut seen = std::collections::HashSet::new();
+        for identity in &self.service_identities {
+            let name = &identity.username;
+            validate_username(name)
+                .and_then(|()| validate_password(&identity.password()?))
+                .map_err(|e| anyhow::anyhow!("service identity '{name}': {e}"))?;
+            if !seen.insert(name) {
+                anyhow::bail!("service identity '{name}' is declared twice");
+            }
+            // Its policy is named after it, so it must not take over the
+            // admin's, and must not be the admin (whose rights it would cut).
+            if name == ROOT_POLICY_NAME || self.bootstrap_username.as_ref() == Some(name) {
+                anyhow::bail!("service identity '{name}' would replace the bootstrap admin or its root policy");
+            }
+        }
+
         Ok(())
+    }
+}
+
+fn validate_username(name: &str) -> anyhow::Result<()> {
+    secrets_auth_userpass::validate_username(name).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn validate_password(password: &str) -> anyhow::Result<()> {
+    secrets_auth_userpass::validate_password(password).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+#[cfg(test)]
+// `Jail::expect_with` fixes the closure's error type to `figment::Error`.
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::*;
+    use figment::Jail;
+    use secrets_core::policy::Capability;
+
+    /// Byte for byte what `typednotes-infra` sets (its `vaultServiceIdentities`).
+    const IDENTITIES: &str = concat!(
+        r#"[{username="typednotes-app", password_env="APP_SECRETS_PASSWORD", "#,
+        r#"rules=[{prefix="secret/data/thirdparty/", capabilities=["create","delete"]}]}, "#,
+        r#"{username="liaison", password_env="LIAISON_SECRETS_PASSWORD", "#,
+        r#"rules=[{prefix="secret/data/thirdparty/", capabilities=["read","create"]}]}]"#
+    );
+
+    fn base(jail: &mut Jail) {
+        jail.set_env("SECRETS_SERVER_STORAGE_DATABASE_URL", "postgres://u@h/db");
+        jail.set_env("SECRETS_SERVER_BOOTSTRAP_USERNAME", "admin");
+        jail.set_env("SECRETS_SERVER_BOOTSTRAP_PASSWORD", "change-me");
+    }
+
+    fn err(config: &Config) -> String {
+        config.validate().unwrap_err().to_string()
+    }
+
+    /// The shape a deploy tool puts in one env var, as figment parses it.
+    #[test]
+    fn service_identities_parse_from_one_env_var() {
+        Jail::expect_with(|jail| {
+            base(jail);
+            jail.set_env("SECRETS_SERVER_SERVICE_IDENTITIES", IDENTITIES);
+            jail.set_env("APP_SECRETS_PASSWORD", "an app password long enough");
+            jail.set_env("LIAISON_SECRETS_PASSWORD", "a liaison password long enough");
+            let config = Config::load().unwrap();
+            config.validate().unwrap();
+
+            let [app, liaison] = config.service_identities.as_slice() else {
+                panic!("{:?}", config.service_identities)
+            };
+            assert_eq!(app.username, "typednotes-app");
+            assert_eq!(app.password().unwrap(), "an app password long enough");
+            assert_eq!(app.rules[0].prefix, "secret/data/thirdparty/");
+            assert_eq!(app.rules[0].capabilities, [Capability::Create, Capability::Delete]);
+            assert_eq!(liaison.rules[0].capabilities, [Capability::Read, Capability::Create]);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn no_service_identities_by_default() {
+        Jail::expect_with(|jail| {
+            base(jail);
+            let config = Config::load().unwrap();
+            assert!(config.service_identities.is_empty());
+            config.validate().unwrap();
+            Ok(())
+        });
+    }
+
+    /// Misconfiguration stops the server at startup, naming the identity —
+    /// never the password.
+    #[test]
+    fn invalid_service_identities_fail_validation() {
+        Jail::expect_with(|jail| {
+            base(jail);
+            jail.set_env("SHORT_PW", "tiny-pw-7");
+            jail.set_env("GOOD_PW", "a password long enough");
+            for (identities, expected) in [
+                (r#"[{username="svc", password_env="UNSET_PW", rules=[]}]"#, "UNSET_PW is not set"),
+                (r#"[{username="svc", password_env="SHORT_PW", rules=[]}]"#, "at least 12"),
+                (r#"[{username="a/b", password_env="GOOD_PW", rules=[]}]"#, "username"),
+                (r#"[{username="admin", password_env="GOOD_PW", rules=[]}]"#, "bootstrap admin"),
+                (r#"[{username="root", password_env="GOOD_PW", rules=[]}]"#, "root policy"),
+                (
+                    r#"[{username="svc", password_env="GOOD_PW", rules=[]},
+                        {username="svc", password_env="GOOD_PW", rules=[]}]"#,
+                    "declared twice",
+                ),
+            ] {
+                jail.set_env("SECRETS_SERVER_SERVICE_IDENTITIES", identities);
+                let message = err(&Config::load().unwrap());
+                assert!(message.contains(expected), "{identities}: {message}");
+                assert!(!message.contains("tiny-pw-7"), "leaked the password: {message}");
+            }
+            Ok(())
+        });
     }
 }
