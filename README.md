@@ -42,7 +42,7 @@ gated by auth and policy, plus on-demand dynamic PostgreSQL credentials.
   - **third-party delegation** — `github/`, `gitlab/`, `aws/`, `gcp/`,
     `gworkspace/`, `dropbox/`, `m365/`: mint scoped, short-lived credentials
     for a consuming microservice so it never holds a long-lived provider
-    secret. See [`docs/delegation/`](docs/delegation/README.md).
+    secret. See [`docs/delegation/`](https://github.com/typednotes/secrets/blob/main/docs/delegation/README.md).
   - `federation/` — the shape where nothing is stored at all: publishes the
     OIDC token-exchange instructions a consumer needs to authenticate to AWS,
     Google Cloud or Entra ID with its own workload identity.
@@ -92,7 +92,7 @@ the same `StorageBackend` trait; only the barrier touches encryption. This
 is a Cargo workspace specifically so that boundary is compiler-enforced:
 `secrets-core` depends on nothing project-specific, every engine/auth crate
 depends only on `secrets-core` plus what it individually needs, and
-`crates/secrets-server/src/wiring.rs` is the single place mounts and auth
+[`crates/secrets-server/src/wiring.rs`](https://github.com/typednotes/secrets/blob/main/crates/secrets-server/src/wiring.rs) is the single place mounts and auth
 methods get registered. Adding a new engine or auth method means
 implementing a trait and adding one line there — not touching routing,
 tokens, or policy evaluation.
@@ -115,7 +115,15 @@ tokens, or policy evaluation.
 | `secrets-auth-oidc` | Interactive + JWT-bearer OIDC login | [![docs.rs](https://img.shields.io/docsrs/secrets-auth-oidc)](https://docs.rs/secrets-auth-oidc) |
 | `secrets-server` | axum binary: HTTP routes + `wiring.rs` composition root | *(not published — see the [Docker image](#docker))* |
 
-Every library crate above is published to [crates.io](https://crates.io/search?q=secrets-core), with docs auto-built on [docs.rs](https://docs.rs/secrets-core) on every release — see [`.github/workflows/crates-publish.yml`](.github/workflows/crates-publish.yml). The publish list is derived from the workspace, so a new crate is released as soon as it exists; `secrets-server` opts out with `publish = false` and ships as a container image instead.
+Every library crate above is published to [crates.io](https://crates.io/search?q=secrets-core), with docs auto-built on [docs.rs](https://docs.rs/secrets-core) on every release — see [`.github/workflows/crates-publish.yml`](https://github.com/typednotes/secrets/blob/main/.github/workflows/crates-publish.yml). The publish list is derived from the workspace, so a new library crate is included in the next tagged release; `secrets-server` opts out with `publish = false` and ships as a container image instead.
+
+Crate publication uses the same exact-commit main CI gate as the Docker release
+below. A manual retry must supply an **existing version tag**: it checks out
+that tag, verifies its actual SHA again, and publishes the verified checkout
+with `CARGO_REGISTRY_TOKEN`. The tag must match the workspace version.
+`secrets-core` publishes first; already-published crate versions are skipped,
+so retrying a partial release is safe. Tag publication does not repeat the
+full test/Clippy suite.
 
 ## Quick start
 
@@ -125,9 +133,23 @@ engine later manages credentials on.
 
 ### Docker
 
-A public image is published to GitHub Container Registry on every push to
-`main` (tag `edge`) and on version tags (tags `X.Y.Z`, `X.Y`, `latest`) —
-see [`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml).
+A public image is published to GitHub Container Registry only on version tags —
+see [`.github/workflows/docker-publish.yml`](https://github.com/typednotes/secrets/blob/main/.github/workflows/docker-publish.yml).
+Stable `vX.Y.Z` tags publish `X.Y.Z`, `X.Y` and automatic `latest` through
+Docker metadata's semver rules. Prereleases publish their full version only,
+without advancing `latest` or a shortened version alias. Main pushes publish no image.
+
+[`ci.yml`](https://github.com/typednotes/secrets/blob/main/.github/workflows/ci.yml)
+runs on pushes to `main` and pull requests targeting `main`. Push `main` and
+wait for CI on the release commit before pushing its version tag. Both
+publishers first use a verification job with only `contents: read` and
+`actions: read`; [`ci/require-main-ci.sh`](https://github.com/typednotes/secrets/blob/main/ci/require-main-ci.sh)
+requires the actual checkout to match the tag's commit, that commit to be
+reachable from `origin/main`, and its latest **push-to-main** `ci.yml` run to
+be completed/success. Missing, pending or failed latest runs block publication;
+PR/manual CI and another commit's result do not qualify. The Docker image job
+then checks out the verified SHA and uses `packages: write` to build and
+publish, without repeating the full CI suite on tags.
 
 ```bash
 docker run --rm -p 8200:8200 \
@@ -135,7 +157,7 @@ docker run --rm -p 8200:8200 \
   -e SECRETS_MASTER_KEY=$(openssl rand -hex 32) \
   -e SECRETS_SERVER_BOOTSTRAP_USERNAME=admin \
   -e SECRETS_SERVER_BOOTSTRAP_PASSWORD=change-me \
-  ghcr.io/typednotes/secrets-server:edge
+  ghcr.io/typednotes/secrets-server:latest
 ```
 
 The storage Postgres must be reachable from inside the container — use
@@ -166,7 +188,7 @@ Don't switch an existing database between the two modes without reconciling
 
 Config can also come from `secrets-server.toml` in the working directory;
 environment variables (prefixed `SECRETS_SERVER_`) take precedence. See
-`crates/secrets-server/src/config.rs` for every field and its default —
+[`crates/secrets-server/src/config.rs`](https://github.com/typednotes/secrets/blob/main/crates/secrets-server/src/config.rs) for every field and its default —
 config is validated at startup, so a typo'd `listen_addr` or a
 non-Postgres `storage_database_url` fails fast instead of surfacing later.
 
@@ -419,7 +441,7 @@ overwritten by a re-encryption of stale plaintext.
 
 ### Integration tests against a running server
 
-`crates/secrets-server/tests/integration.rs` drives the HTTP API of an
+[`crates/secrets-server/tests/integration.rs`](https://github.com/typednotes/secrets/blob/main/crates/secrets-server/tests/integration.rs) drives the HTTP API of an
 already-running server — local or deployed — over the network. The target
 is given by environment variable:
 
@@ -456,8 +478,8 @@ already carry `testcontainers`/`testcontainers-modules` dev-dependencies
 for that purpose.
 
 CI runs both `cargo test --workspace --lib --bins` and
-`cargo clippy --workspace --all-targets -- -D warnings` on every pull
-request — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+`cargo clippy --workspace --all-targets -- -D warnings` on pushes to `main`
+and pull requests targeting `main` — see [`.github/workflows/ci.yml`](https://github.com/typednotes/secrets/blob/main/.github/workflows/ci.yml).
 
 ## Project status and scope
 
@@ -476,18 +498,18 @@ and means your HA story is your Postgres HA story.
 ## Further reading
 
 Design rationale and comparisons to existing secret managers live in
-[`docs/`](docs/):
+[`docs/`](https://github.com/typednotes/secrets/tree/main/docs/):
 
-- [Alternatives compared](docs/alternatives.md)
-- [**Delegating third-party access**](docs/delegation/README.md) — how a
+- [Alternatives compared](https://github.com/typednotes/secrets/blob/main/docs/alternatives.md)
+- [**Delegating third-party access**](https://github.com/typednotes/secrets/blob/main/docs/delegation/README.md) — how a
   microservice gets GitHub, GitLab, AWS, GCS, Google Workspace, Dropbox or
   Microsoft 365 access without holding a long-lived credential, with a guide
-  per provider, plus [**federation**](docs/delegation/federation.md) (the shape
-  that stores nothing) and [**setup runbooks**](docs/delegation/setup/README.md)
+  per provider, plus [**federation**](https://github.com/typednotes/secrets/blob/main/docs/delegation/federation.md) (the shape
+  that stores nothing) and [**setup runbooks**](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/README.md)
   for every engine
-- [Symmetric cryptography](docs/symmetric-cryptography.md), [asymmetric cryptography](docs/asymmetric-cryptography.md), [post-quantum cryptography](docs/post-quantum-cryptography.md)
-- [Hashing](docs/hashing.md), [key derivation](docs/key-derivation.md), [TLS](docs/tls.md)
-- [`docs/tools/`](docs/tools/) — notes on HashiCorp Vault, OpenBao, Bitwarden, 1Password-style tools, and others
+- [Symmetric cryptography](https://github.com/typednotes/secrets/blob/main/docs/symmetric-cryptography.md), [asymmetric cryptography](https://github.com/typednotes/secrets/blob/main/docs/asymmetric-cryptography.md), [post-quantum cryptography](https://github.com/typednotes/secrets/blob/main/docs/post-quantum-cryptography.md)
+- [Hashing](https://github.com/typednotes/secrets/blob/main/docs/hashing.md), [key derivation](https://github.com/typednotes/secrets/blob/main/docs/key-derivation.md), [TLS](https://github.com/typednotes/secrets/blob/main/docs/tls.md)
+- [`docs/tools/`](https://github.com/typednotes/secrets/tree/main/docs/tools/) — notes on HashiCorp Vault, OpenBao, Bitwarden, 1Password-style tools, and others
 
 ## Contributing
 
@@ -498,8 +520,8 @@ cargo test --workspace --lib --bins
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-CI re-checks both on every pull request.
+CI re-checks both on pushes to `main` and pull requests targeting `main`.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](https://github.com/typednotes/secrets/blob/main/LICENSE).

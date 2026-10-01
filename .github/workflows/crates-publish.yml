@@ -3,23 +3,59 @@ on:
   push:
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to publish (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
-    env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.ci.outputs.sha }}
+      tag: ${{ steps.ci.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require successful main CI for the exact tag commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: bash ci/require-main-ci.sh ci.yml "$TAG"
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Check tag matches workspace version
-        if: github.event_name == 'push'
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${TAG#v}"
           cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           if [ "$tag_version" != "$cargo_version" ]; then
-            echo "Tag $GITHUB_REF_NAME (version $tag_version) does not match Cargo.toml workspace version $cargo_version" >&2
+            echo "Tag $TAG (version $tag_version) does not match Cargo.toml workspace version $cargo_version" >&2
             exit 1
           fi
 
@@ -33,6 +69,8 @@ jobs:
       # Each publish is skipped if that exact version is already live, so a
       # retry after a partial failure (e.g. crates.io rate limiting) is safe.
       - name: Publish library crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           metadata=$(cargo metadata --no-deps --format-version 1)
           others=$(echo "$metadata" | jq -r '.packages[] | select(.publish != []) | .name' \

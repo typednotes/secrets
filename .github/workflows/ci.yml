@@ -1,6 +1,7 @@
 name: CI
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
 
@@ -9,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Offline release gate regressions
+        shell: bash
+        run: bash ci/test-require-main-ci.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

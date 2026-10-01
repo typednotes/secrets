@@ -45,7 +45,7 @@ flowchart LR
 
 The consumer authenticates as *itself* (an OIDC workload token, or a
 `userpass` identity of its own — see [Userpass
-users](../../README.md#userpass-users)), policy decides which providers and which scopes it may
+users](https://github.com/typednotes/secrets/blob/main/README.md#userpass-users)), policy decides which providers and which scopes it may
 reach, and what it receives expires on its own. The server keeps the only
 durable secret, in one place, encrypted, with one audit trail.
 
@@ -113,7 +113,7 @@ in this architecture whose compromise is unbounded.
 ## How a shape becomes an engine
 
 Shapes A and B are new `SecretsEngine` implementations. The trait
-(`crates/secrets-core/src/engine.rs`) already has the two methods that
+([`crates/secrets-core/src/engine.rs`](https://github.com/typednotes/secrets/blob/main/crates/secrets-core/src/engine.rs)) already has the two methods that
 matter, defaulting to `Unsupported` so static engines ignore them:
 
 ```rust
@@ -192,7 +192,7 @@ path:
 ```
 
 Because policy is longest-prefix-match and deny-by-default
-(`crates/secrets-core/src/policy.rs`), a consumer granted
+([`crates/secrets-core/src/policy.rs`](https://github.com/typednotes/secrets/blob/main/crates/secrets-core/src/policy.rs)), a consumer granted
 `github/creds/report-service` cannot reach another role's credentials, the
 role definitions, or the root credential.
 
@@ -208,22 +208,22 @@ Each guide states the shape, the exact credential it mints, its TTL, what it
 can be narrowed to, whether revocation does anything, what root credential
 the server must hold, and the setup and request flows as diagrams.
 
-Every mechanism here is implemented — see [`setup/`](setup/) for the operator
+Every mechanism here is implemented — see [`setup/`](https://github.com/typednotes/secrets/tree/main/docs/delegation/setup/) for the operator
 runbook for each, with the exact `config` and `roles` documents each engine
-expects. [**Federation**](federation.md) gets its own deep dive, because it is
+expects. [**Federation**](https://github.com/typednotes/secrets/blob/main/docs/delegation/federation.md) gets its own deep dive, because it is
 the shape worth reaching for first and the one whose setup decides whether it
 is the safest option or the most dangerous.
 
 | Guide | Best available shape | Shortest TTL | True revocation? |
 |---|---|---|---|
-| [GitHub](github.md) | **A** — App installation tokens | 1 h (fixed) | **yes** |
-| [GitLab](gitlab.md) | **A** — project/group tokens | 1 day at the provider; ours can be shorter | **yes** |
-| [AWS](aws.md) | **E**, else **B** — STS | 15 min | no — per-role only |
-| [Google Cloud Storage](gcp-storage.md) | **E**, else **B** — impersonation + downscoping | 15 min | no (HMAC keys excepted) |
-| [Google Workspace / Drive](google-workspace.md) | **C** — brokered access tokens | ~1 h | refresh token only |
-| [Dropbox](dropbox.md) | **C** — brokered access tokens | 4 h (fixed) | yes, but destroys the authorisation |
-| [Microsoft 365](microsoft-365.md) | **E**, else **B** — Graph | 10 min via policy | no — refresh tokens only |
-| [**Federation**](federation.md) | **E** — no credential exists | n/a | n/a — nothing is issued |
+| [GitHub](https://github.com/typednotes/secrets/blob/main/docs/delegation/github.md) | **A** — App installation tokens | 1 h (fixed) | **yes** |
+| [GitLab](https://github.com/typednotes/secrets/blob/main/docs/delegation/gitlab.md) | **A** — project/group tokens | 1 day at the provider; ours can be shorter | **yes** |
+| [AWS](https://github.com/typednotes/secrets/blob/main/docs/delegation/aws.md) | **E**, else **B** — STS | 15 min | no — per-role only |
+| [Google Cloud Storage](https://github.com/typednotes/secrets/blob/main/docs/delegation/gcp-storage.md) | **E**, else **B** — impersonation + downscoping | 15 min | no (HMAC keys excepted) |
+| [Google Workspace / Drive](https://github.com/typednotes/secrets/blob/main/docs/delegation/google-workspace.md) | **C** — brokered access tokens | ~1 h | refresh token only |
+| [Dropbox](https://github.com/typednotes/secrets/blob/main/docs/delegation/dropbox.md) | **C** — brokered access tokens | 4 h (fixed) | yes, but destroys the authorisation |
+| [Microsoft 365](https://github.com/typednotes/secrets/blob/main/docs/delegation/microsoft-365.md) | **E**, else **B** — Graph | 10 min via policy | no — refresh tokens only |
+| [**Federation**](https://github.com/typednotes/secrets/blob/main/docs/delegation/federation.md) | **E** — no credential exists | n/a | n/a — nothing is issued |
 
 Three patterns emerge across all seven. **Only GitHub gives a lease its full
 meaning** — short, narrow, and revocable together. **The three big clouds all

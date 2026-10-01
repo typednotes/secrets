@@ -12,14 +12,14 @@ flowchart LR
 
 | Guide | Mount | Shape |
 |---|---|---|
-| [GitHub](github.md) | `github/` | A — mint and revoke |
-| [GitLab](gitlab.md) | `gitlab/` | A — mint and revoke |
-| [AWS](aws.md) | `aws/` | B, or A with `iam_user` |
-| [Google Cloud Storage](gcp-storage.md) | `gcp/` | B, or A with `hmac` |
-| [Google Workspace](google-workspace.md) | `gworkspace/` | C — refresh broker |
-| [Dropbox](dropbox.md) | `dropbox/` | C — refresh broker |
-| [Microsoft 365](microsoft-365.md) | `m365/` | B |
-| [Federation](../federation.md#setting-it-up--aws) | `federation/` | E — nothing stored |
+| [GitHub](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/github.md) | `github/` | A — mint and revoke |
+| [GitLab](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/gitlab.md) | `gitlab/` | A — mint and revoke |
+| [AWS](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/aws.md) | `aws/` | B, or A with `iam_user` |
+| [Google Cloud Storage](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/gcp-storage.md) | `gcp/` | B, or A with `hmac` |
+| [Google Workspace](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/google-workspace.md) | `gworkspace/` | C — refresh broker |
+| [Dropbox](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/dropbox.md) | `dropbox/` | C — refresh broker |
+| [Microsoft 365](https://github.com/typednotes/secrets/blob/main/docs/delegation/setup/microsoft-365.md) | `m365/` | B |
+| [Federation](https://github.com/typednotes/secrets/blob/main/docs/delegation/federation.md#setting-it-up--aws) | `federation/` | E — nothing stored |
 
 ## Before you start
 
