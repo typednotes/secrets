@@ -140,13 +140,14 @@ Docker metadata's semver rules. Prereleases publish their full version only,
 without advancing `latest` or a shortened version alias. Main pushes publish no image.
 
 [`ci.yml`](https://github.com/typednotes/secrets/blob/main/.github/workflows/ci.yml)
-runs on pushes to `main` and pull requests targeting `main`. Push `main` and
-wait for CI on the release commit before pushing its version tag. Both
+runs on pushes to `main` and pull requests targeting `main`. The user may push
+the release commit and its new version tag together: `git push origin main vX.Y.Z`. Both
 publishers first use a verification job with only `contents: read` and
 `actions: read`; [`ci/require-main-ci.sh`](https://github.com/typednotes/secrets/blob/main/ci/require-main-ci.sh)
 requires the actual checkout to match the tag's commit, that commit to be
 reachable from `origin/main`, and its latest **push-to-main** `ci.yml` run to
-be completed/success. Missing, pending or failed latest runs block publication;
+be completed/success. Missing/pending CI is polled for up to two hours; failed or
+cancelled runs, invalid evidence, API errors and wait timeouts block publication.
 PR/manual CI and another commit's result do not qualify. The Docker image job
 then checks out the verified SHA and uses `packages: write` to build and
 publish, without repeating the full CI suite on tags.

@@ -19,6 +19,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 130
     permissions:
       contents: read
       actions: read
@@ -31,7 +32,7 @@ jobs:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Require successful main CI for the exact tag commit
+      - name: Wait for successful main CI for the exact tag commit
         id: ci
         env:
           GH_TOKEN: ${{ github.token }}
