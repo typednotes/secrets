@@ -37,107 +37,109 @@ pub struct AppState {
 /// Separated from `build` so tests can assert against the real mount table
 /// rather than a copy of it that drifts.
 pub fn engine_mounts() -> Vec<EngineMount> {
-        let kv: Arc<dyn SecretsEngine> = Arc::new(KvEngine::new());
-        let postgres: Arc<dyn SecretsEngine> = Arc::new(PostgresEngine::new());
-        // Each third-party engine is mounted twice: once at `{name}/creds/` so a
-        // generate request resolves to just the role name, and once at `{name}/`
-        // for the operator's config/roles surface and the help endpoint.
-        let github: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_github::GithubEngine::new());
-        let gitlab: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gitlab::GitlabEngine::new());
-        let aws: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_aws::AwsEngine::new());
-        let gcp: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gcp::GcpEngine::new());
-        let gworkspace: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gworkspace::GworkspaceEngine::new());
-        let dropbox: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_dropbox::DropboxEngine::new());
-        let m365: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_m365::M365Engine::new());
-        let federation: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_federation::FederationEngine::new());
-        vec![
-            EngineMount {
-                prefix: "secret/data/".to_string(),
-                engine: kv.clone(),
-            },
-            EngineMount {
-                prefix: "secret/metadata/".to_string(),
-                engine: kv.clone(),
-            },
-            // Catch-all for the KV mount so `GET /v1/secret/help` resolves. Longest
-            // -prefix match means data/ and metadata/ still win for real requests.
-            EngineMount {
-                prefix: "secret/".to_string(),
-                engine: kv,
-            },
-            EngineMount {
-                prefix: "database/creds/".to_string(),
-                engine: postgres.clone(),
-            },
-            EngineMount {
-                prefix: "database/".to_string(),
-                engine: postgres,
-            },
-            EngineMount {
-                prefix: "github/creds/".to_string(),
-                engine: github.clone(),
-            },
-            EngineMount {
-                prefix: "github/".to_string(),
-                engine: github,
-            },
-            EngineMount {
-                prefix: "gitlab/creds/".to_string(),
-                engine: gitlab.clone(),
-            },
-            EngineMount {
-                prefix: "gitlab/".to_string(),
-                engine: gitlab,
-            },
-            EngineMount {
-                prefix: "aws/creds/".to_string(),
-                engine: aws.clone(),
-            },
-            EngineMount {
-                prefix: "aws/".to_string(),
-                engine: aws,
-            },
-            EngineMount {
-                prefix: "gcp/creds/".to_string(),
-                engine: gcp.clone(),
-            },
-            EngineMount {
-                prefix: "gcp/".to_string(),
-                engine: gcp,
-            },
-            EngineMount {
-                prefix: "gworkspace/creds/".to_string(),
-                engine: gworkspace.clone(),
-            },
-            EngineMount {
-                prefix: "gworkspace/".to_string(),
-                engine: gworkspace,
-            },
-            EngineMount {
-                prefix: "dropbox/creds/".to_string(),
-                engine: dropbox.clone(),
-            },
-            EngineMount {
-                prefix: "dropbox/".to_string(),
-                engine: dropbox,
-            },
-            EngineMount {
-                prefix: "m365/creds/".to_string(),
-                engine: m365.clone(),
-            },
-            EngineMount {
-                prefix: "m365/".to_string(),
-                engine: m365,
-            },
-            EngineMount {
-                prefix: "federation/creds/".to_string(),
-                engine: federation.clone(),
-            },
-            EngineMount {
-                prefix: "federation/".to_string(),
-                engine: federation,
-            },
-        ]
+    let kv: Arc<dyn SecretsEngine> = Arc::new(KvEngine::new());
+    let postgres: Arc<dyn SecretsEngine> = Arc::new(PostgresEngine::new());
+    // Each third-party engine is mounted twice: once at `{name}/creds/` so a
+    // generate request resolves to just the role name, and once at `{name}/`
+    // for the operator's config/roles surface and the help endpoint.
+    let github: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_github::GithubEngine::new());
+    let gitlab: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gitlab::GitlabEngine::new());
+    let aws: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_aws::AwsEngine::new());
+    let gcp: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_gcp::GcpEngine::new());
+    let gworkspace: Arc<dyn SecretsEngine> =
+        Arc::new(secrets_engine_gworkspace::GworkspaceEngine::new());
+    let dropbox: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_dropbox::DropboxEngine::new());
+    let m365: Arc<dyn SecretsEngine> = Arc::new(secrets_engine_m365::M365Engine::new());
+    let federation: Arc<dyn SecretsEngine> =
+        Arc::new(secrets_engine_federation::FederationEngine::new());
+    vec![
+        EngineMount {
+            prefix: "secret/data/".to_string(),
+            engine: kv.clone(),
+        },
+        EngineMount {
+            prefix: "secret/metadata/".to_string(),
+            engine: kv.clone(),
+        },
+        // Catch-all for the KV mount so `GET /v1/secret/help` resolves. Longest
+        // -prefix match means data/ and metadata/ still win for real requests.
+        EngineMount {
+            prefix: "secret/".to_string(),
+            engine: kv,
+        },
+        EngineMount {
+            prefix: "database/creds/".to_string(),
+            engine: postgres.clone(),
+        },
+        EngineMount {
+            prefix: "database/".to_string(),
+            engine: postgres,
+        },
+        EngineMount {
+            prefix: "github/creds/".to_string(),
+            engine: github.clone(),
+        },
+        EngineMount {
+            prefix: "github/".to_string(),
+            engine: github,
+        },
+        EngineMount {
+            prefix: "gitlab/creds/".to_string(),
+            engine: gitlab.clone(),
+        },
+        EngineMount {
+            prefix: "gitlab/".to_string(),
+            engine: gitlab,
+        },
+        EngineMount {
+            prefix: "aws/creds/".to_string(),
+            engine: aws.clone(),
+        },
+        EngineMount {
+            prefix: "aws/".to_string(),
+            engine: aws,
+        },
+        EngineMount {
+            prefix: "gcp/creds/".to_string(),
+            engine: gcp.clone(),
+        },
+        EngineMount {
+            prefix: "gcp/".to_string(),
+            engine: gcp,
+        },
+        EngineMount {
+            prefix: "gworkspace/creds/".to_string(),
+            engine: gworkspace.clone(),
+        },
+        EngineMount {
+            prefix: "gworkspace/".to_string(),
+            engine: gworkspace,
+        },
+        EngineMount {
+            prefix: "dropbox/creds/".to_string(),
+            engine: dropbox.clone(),
+        },
+        EngineMount {
+            prefix: "dropbox/".to_string(),
+            engine: dropbox,
+        },
+        EngineMount {
+            prefix: "m365/creds/".to_string(),
+            engine: m365.clone(),
+        },
+        EngineMount {
+            prefix: "m365/".to_string(),
+            engine: m365,
+        },
+        EngineMount {
+            prefix: "federation/creds/".to_string(),
+            engine: federation.clone(),
+        },
+        EngineMount {
+            prefix: "federation/".to_string(),
+            engine: federation,
+        },
+    ]
 }
 
 pub async fn build(config: &Config) -> anyhow::Result<AppState> {
@@ -154,7 +156,9 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
     let aead: Arc<dyn Aead> = Arc::new(KeyRing::new(&master_key.current_key(), &retired));
 
     if !config.storage_migrate {
-        tracing::info!("storage migrations disabled; expecting the schema to be applied externally");
+        tracing::info!(
+            "storage migrations disabled; expecting the schema to be applied externally"
+        );
     }
     let raw_storage =
         PgStorage::connect_with(&config.storage_database_url, config.storage_migrate).await?;
@@ -169,7 +173,9 @@ pub async fn build(config: &Config) -> anyhow::Result<AppState> {
         );
     }
 
-    if let (Some(username), Some(password)) = (&config.bootstrap_username, &config.bootstrap_password) {
+    if let (Some(username), Some(password)) =
+        (&config.bootstrap_username, &config.bootstrap_password)
+    {
         bootstrap_admin(storage.as_ref(), username, password).await?;
     }
     apply_service_identities(storage.as_ref(), &config.service_identities).await?;
@@ -215,7 +221,13 @@ async fn bootstrap_admin(
         }],
     };
     policy::store_policy(storage, &root_policy).await?;
-    UserPassAuth::create_user(storage, username, password, vec![ROOT_POLICY_NAME.to_string()]).await?;
+    UserPassAuth::create_user(
+        storage,
+        username,
+        password,
+        vec![ROOT_POLICY_NAME.to_string()],
+    )
+    .await?;
     tracing::info!(username, "bootstrapped initial admin user");
     Ok(())
 }
@@ -276,7 +288,11 @@ mod tests {
         }
         async fn list(&self, prefix: &str) -> StorageResult<Vec<String>> {
             let map = self.0.lock().unwrap();
-            Ok(map.keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+            Ok(map
+                .keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
         }
     }
 
@@ -312,28 +328,48 @@ mod tests {
     async fn service_identities_are_applied_on_every_start() {
         const ENV: &str = "SECRETS_TEST_WIRING_APP_PW";
         let storage = MemStorage::default();
-        let identities = [identity("typednotes-app", ENV, vec![Capability::Create, Capability::Delete])];
+        let identities = [identity(
+            "typednotes-app",
+            ENV,
+            vec![Capability::Create, Capability::Delete],
+        )];
 
         // SAFETY: this test is the only reader and writer of this variable.
         unsafe { std::env::set_var(ENV, "first password, long enough") };
-        apply_service_identities(&storage, &identities).await.unwrap();
+        apply_service_identities(&storage, &identities)
+            .await
+            .unwrap();
         assert_eq!(
             login(&storage, "typednotes-app", "first password, long enough").await,
             Some(vec!["typednotes-app".to_string()])
         );
-        let policy = policy::get_policy(&storage, "typednotes-app").await.unwrap().unwrap();
+        let policy = policy::get_policy(&storage, "typednotes-app")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(policy.is_allowed("secret/data/thirdparty/gdrive/u/c", Capability::Create));
         assert!(!policy.is_allowed("secret/data/thirdparty/gdrive/u/c", Capability::Read));
 
         let user_key = "auth/userpass/users/typednotes-app";
         let before = storage.0.lock().unwrap()[user_key].value.clone();
-        apply_service_identities(&storage, &identities).await.unwrap();
+        apply_service_identities(&storage, &identities)
+            .await
+            .unwrap();
         assert_eq!(storage.0.lock().unwrap()[user_key].value, before);
 
         unsafe { std::env::set_var(ENV, "rotated password, long enough") };
-        apply_service_identities(&storage, &identities).await.unwrap();
-        assert_eq!(login(&storage, "typednotes-app", "first password, long enough").await, None);
-        assert!(login(&storage, "typednotes-app", "rotated password, long enough").await.is_some());
+        apply_service_identities(&storage, &identities)
+            .await
+            .unwrap();
+        assert_eq!(
+            login(&storage, "typednotes-app", "first password, long enough").await,
+            None
+        );
+        assert!(
+            login(&storage, "typednotes-app", "rotated password, long enough")
+                .await
+                .is_some()
+        );
         unsafe { std::env::remove_var(ENV) };
     }
 
@@ -343,16 +379,27 @@ mod tests {
     async fn service_identities_leave_the_admin_alone() {
         const ENV: &str = "SECRETS_TEST_WIRING_LIAISON_PW";
         let storage = MemStorage::default();
-        bootstrap_admin(&storage, "admin", "change-me").await.unwrap();
-        // SAFETY: this test is the only reader and writer of this variable.
-        unsafe { std::env::set_var(ENV, "liaison password, long enough") };
-        apply_service_identities(&storage, &[identity("liaison", ENV, vec![Capability::Read])])
+        bootstrap_admin(&storage, "admin", "change-me")
             .await
             .unwrap();
+        // SAFETY: this test is the only reader and writer of this variable.
+        unsafe { std::env::set_var(ENV, "liaison password, long enough") };
+        apply_service_identities(
+            &storage,
+            &[identity("liaison", ENV, vec![Capability::Read])],
+        )
+        .await
+        .unwrap();
         unsafe { std::env::remove_var(ENV) };
 
-        assert_eq!(login(&storage, "admin", "change-me").await, Some(vec![ROOT_POLICY_NAME.to_string()]));
-        let root = policy::get_policy(&storage, ROOT_POLICY_NAME).await.unwrap().unwrap();
+        assert_eq!(
+            login(&storage, "admin", "change-me").await,
+            Some(vec![ROOT_POLICY_NAME.to_string()])
+        );
+        let root = policy::get_policy(&storage, ROOT_POLICY_NAME)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(root.is_allowed("anything", Capability::Sudo));
     }
 }

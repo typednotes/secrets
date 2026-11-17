@@ -1,7 +1,7 @@
-use async_trait::async_trait;
+use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use argon2::Argon2;
+use async_trait::async_trait;
 use secrets_core::auth::{AuthError, AuthMethod, AuthOutcome, AuthResult, LoginRequest};
 use secrets_core::storage::{StorageBackend, StorageEntry};
 use serde::{Deserialize, Serialize};
@@ -229,11 +229,15 @@ async fn put_user(
     Ok(())
 }
 
-async fn get_record(storage: &dyn StorageBackend, username: &str) -> AuthResult<Option<UserRecord>> {
+async fn get_record(
+    storage: &dyn StorageBackend,
+    username: &str,
+) -> AuthResult<Option<UserRecord>> {
     let Some(entry) = storage.get(&user_key(username)).await? else {
         return Ok(None);
     };
-    let record = serde_json::from_slice(&entry.value).map_err(|e| AuthError::Other(e.to_string()))?;
+    let record =
+        serde_json::from_slice(&entry.value).map_err(|e| AuthError::Other(e.to_string()))?;
     Ok(Some(record))
 }
 
@@ -303,7 +307,11 @@ mod tests {
 
     const PASSWORD: &str = "correct horse battery";
 
-    async fn login(storage: &MemStorage, username: &str, password: &str) -> AuthResult<AuthOutcome> {
+    async fn login(
+        storage: &MemStorage,
+        username: &str,
+        password: &str,
+    ) -> AuthResult<AuthOutcome> {
         UserPassAuth::new()
             .login(
                 storage,
@@ -330,7 +338,13 @@ mod tests {
         assert_eq!(outcome.policies, names(&["liaison"]));
         assert_eq!(outcome.display_name, "liaison");
         // Same key scheme as bootstrap, so both paths see the same users.
-        assert!(storage.0.lock().unwrap().contains_key("auth/userpass/users/liaison"));
+        assert!(
+            storage
+                .0
+                .lock()
+                .unwrap()
+                .contains_key("auth/userpass/users/liaison")
+        );
     }
 
     /// Replace means replace: the old password stops working and the policy
@@ -349,7 +363,9 @@ mod tests {
             login(&storage, "app", PASSWORD).await,
             Err(AuthError::InvalidCredentials)
         ));
-        let outcome = login(&storage, "app", "another long password").await.unwrap();
+        let outcome = login(&storage, "app", "another long password")
+            .await
+            .unwrap();
         assert_eq!(outcome.policies, names(&["c"]));
     }
 
@@ -360,7 +376,10 @@ mod tests {
             .await
             .unwrap();
 
-        let info = UserPassAuth::read_user(&storage, "app").await.unwrap().unwrap();
+        let info = UserPassAuth::read_user(&storage, "app")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             info,
             UserInfo {
@@ -372,7 +391,10 @@ mod tests {
         assert!(!json.contains("hash"), "{json}");
         assert!(!json.contains("argon2"), "{json}");
 
-        assert_eq!(UserPassAuth::read_user(&storage, "nobody").await.unwrap(), None);
+        assert_eq!(
+            UserPassAuth::read_user(&storage, "nobody").await.unwrap(),
+            None
+        );
     }
 
     #[tokio::test]
@@ -398,7 +420,9 @@ mod tests {
         UserPassAuth::create_user(&storage, "admin@example.com", "change-me", names(&["root"]))
             .await
             .unwrap();
-        let outcome = login(&storage, "admin@example.com", "change-me").await.unwrap();
+        let outcome = login(&storage, "admin@example.com", "change-me")
+            .await
+            .unwrap();
         assert_eq!(outcome.policies, names(&["root"]));
     }
 
@@ -407,20 +431,37 @@ mod tests {
     #[tokio::test]
     async fn ensure_user_writes_only_what_differs() {
         let storage = MemStorage::default();
-        let stored = |s: &MemStorage| {
-            s.0.lock().unwrap()["auth/userpass/users/app"].value.clone()
-        };
+        let stored = |s: &MemStorage| s.0.lock().unwrap()["auth/userpass/users/app"].value.clone();
 
-        assert!(UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"])).await.unwrap());
+        assert!(
+            UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"]))
+                .await
+                .unwrap()
+        );
         let first = stored(&storage);
-        assert!(!UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"])).await.unwrap());
+        assert!(
+            !UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["p"]))
+                .await
+                .unwrap()
+        );
         assert_eq!(stored(&storage), first, "an unchanged user was rewritten");
 
-        assert!(UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["q"])).await.unwrap());
-        assert_eq!(login(&storage, "app", PASSWORD).await.unwrap().policies, names(&["q"]));
+        assert!(
+            UserPassAuth::ensure_user(&storage, "app", PASSWORD, names(&["q"]))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            login(&storage, "app", PASSWORD).await.unwrap().policies,
+            names(&["q"])
+        );
 
         let rotated = "a rotated long password";
-        assert!(UserPassAuth::ensure_user(&storage, "app", rotated, names(&["q"])).await.unwrap());
+        assert!(
+            UserPassAuth::ensure_user(&storage, "app", rotated, names(&["q"]))
+                .await
+                .unwrap()
+        );
         assert!(matches!(
             login(&storage, "app", PASSWORD).await,
             Err(AuthError::InvalidCredentials)
@@ -455,7 +496,14 @@ mod tests {
 
     #[test]
     fn username_rules() {
-        for ok in ["a", "typednotes-app", "svc_1.v2", "A-Z.0_9", &"x".repeat(64), "a."] {
+        for ok in [
+            "a",
+            "typednotes-app",
+            "svc_1.v2",
+            "A-Z.0_9",
+            &"x".repeat(64),
+            "a.",
+        ] {
             assert!(validate_username(ok).is_ok(), "{ok:?} rejected");
         }
         for bad in [

@@ -206,7 +206,13 @@ mod tests {
     /// lock, so this is a pinned value, not a round-trip check.
     #[test]
     fn advisory_lock_ids_are_stable_and_distinct() {
-        assert_eq!(advisory_lock_id("secrets/lease-reaper"), advisory_lock_id("secrets/lease-reaper"));
-        assert_ne!(advisory_lock_id("secrets/lease-reaper"), advisory_lock_id("secrets/other"));
+        assert_eq!(
+            advisory_lock_id("secrets/lease-reaper"),
+            advisory_lock_id("secrets/lease-reaper")
+        );
+        assert_ne!(
+            advisory_lock_id("secrets/lease-reaper"),
+            advisory_lock_id("secrets/other")
+        );
     }
 }

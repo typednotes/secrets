@@ -185,11 +185,12 @@ impl M365Engine {
         token_endpoint: &str,
         now: DateTime<Utc>,
     ) -> EngineResult<String> {
-        let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).map_err(|e| {
-            EngineError::InvalidRequest(format!(
-                "m365/config credential.private_key_pem is not a valid RSA PEM: {e}"
-            ))
-        })?;
+        let key =
+            jsonwebtoken::EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).map_err(|e| {
+                EngineError::InvalidRequest(format!(
+                    "m365/config credential.private_key_pem is not a valid RSA PEM: {e}"
+                ))
+            })?;
         jsonwebtoken::encode(
             &Self::assertion_header(x5t_s256),
             &Self::assertion_claims(client_id, token_endpoint, now),
@@ -408,7 +409,11 @@ impl SecretsEngine for M365Engine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -418,7 +423,9 @@ impl SecretsEngine for M365Engine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        STORE.handle_write::<M365Config, RoleConfig>(storage, path, data).await
+        STORE
+            .handle_write::<M365Config, RoleConfig>(storage, path, data)
+            .await
     }
 
     async fn delete(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<()> {
@@ -553,7 +560,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(parsed.authority, DEFAULT_AUTHORITY);
-        assert!(matches!(parsed.credential, CredentialKind::Federated { .. }));
+        assert!(matches!(
+            parsed.credential,
+            CredentialKind::Federated { .. }
+        ));
     }
 
     #[test]
@@ -585,7 +595,10 @@ mod tests {
         assert_eq!(claims.iss, config.client_id);
         assert_eq!(claims.sub, config.client_id);
         assert_eq!(claims.exp - claims.iat, CLIENT_ASSERTION_TTL_SECONDS);
-        assert!(claims.exp - claims.iat <= 600, "assertion must be short-lived");
+        assert!(
+            claims.exp - claims.iat <= 600,
+            "assertion must be short-lived"
+        );
 
         let other = M365Engine::assertion_claims(&config.client_id, &endpoint, now);
         assert_ne!(claims.jti, other.jti, "jti must be unique per assertion");
@@ -622,7 +635,10 @@ mod tests {
         let err = M365Engine::read_federated_token(&path).unwrap_err();
         match err {
             EngineError::InvalidRequest(message) => {
-                assert!(message.contains(&path), "error should name the path: {message}");
+                assert!(
+                    message.contains(&path),
+                    "error should name the path: {message}"
+                );
                 assert!(
                     message.contains("AZURE_FEDERATED_TOKEN_FILE"),
                     "error should point at the convention: {message}"
@@ -657,7 +673,11 @@ mod tests {
         let scoped = M365Engine::scope_description(&role(), &config);
 
         assert!(scoped.iter().any(|s| s.contains("permissions:ALL")));
-        assert!(scoped.iter().any(|s| s.contains("resource-narrowing:NONE RECORDED")));
+        assert!(
+            scoped
+                .iter()
+                .any(|s| s.contains("resource-narrowing:NONE RECORDED"))
+        );
         assert!(scoped.contains(&format!("tenant:{}", config.tenant_id)));
     }
 

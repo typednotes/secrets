@@ -20,7 +20,7 @@ Typednotes services. A change is done when `cargo test --workspace --lib --bins`
 | Install | `cargo build --workspace`; running the server needs Postgres plus `SECRETS_SERVER_STORAGE_DATABASE_URL` and `SECRETS_MASTER_KEY` (see `README.md`, "From source") |
 | Type-check | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Test | `cargo test --workspace --lib --bins`; opt-in against a running server: `SECRETS_TEST_URL=… SECRETS_TEST_USERNAME=… SECRETS_TEST_PASSWORD=… cargo test -p secrets-server --test integration` |
-| Lint / format | `cargo clippy --workspace --all-targets -- -D warnings`; `TODO(agents-md): no formatter check is configured` |
+| Lint / format | `cargo clippy --workspace --all-targets -- -D warnings`; `cargo fmt --all --check` |
 | Build / release | `cargo build --release --locked -p secrets-server` (see `Dockerfile`); release: a `vX.Y.Z` tag equal to the workspace version runs `.github/workflows/crates-publish.yml` and `docker-publish.yml`, gated by `ci/require-main-ci.sh` |
 | CLI (applications) | `cargo run -p secrets-server` — starts the server; `TODO(agents-md): no --help or subcommands yet` |
 
@@ -158,8 +158,8 @@ experiments are logged too.
 
 - Use the standard type-checker of the language/framework in its strictest practical mode, run it in
   CI, and keep it at zero errors. Here: Rust (edition 2024), with
-  `cargo clippy --workspace --all-targets -- -D warnings` in CI (default clippy lint groups; no
-  `[lints]` table or `clippy.toml`).
+  `cargo clippy --workspace --all-targets -- -D warnings` (default clippy lint groups; warnings
+  fail the build) and `cargo fmt --all --check` in CI.
 - Make illegal states unrepresentable: precise types, enums/sum types over strings and flags, new
   types for identifiers and units, immutable data by default. Avoid `Any`, casts and ignores; when
   one is unavoidable, scope it narrowly and justify it in a comment.

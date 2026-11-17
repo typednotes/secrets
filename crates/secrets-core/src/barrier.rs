@@ -252,15 +252,24 @@ mod tests {
             .unwrap();
 
         let barrier = Barrier::new(raw, Arc::new(KeyRing::new(&NEW, &[OLD])));
-        assert_eq!(barrier.get("secret/a").await.unwrap().unwrap().value, b"alpha");
+        assert_eq!(
+            barrier.get("secret/a").await.unwrap().unwrap().value,
+            b"alpha"
+        );
 
         let report = barrier.rewrap_all().await.unwrap();
         assert_eq!((report.scanned, report.rewrapped, report.failed), (1, 1, 0));
-        assert_eq!(barrier.get("secret/a").await.unwrap().unwrap().value, b"alpha");
+        assert_eq!(
+            barrier.get("secret/a").await.unwrap().unwrap().value,
+            b"alpha"
+        );
 
         // The point of the exercise: the old key can now be dropped.
         let rotated = Barrier::new(barrier.inner, Arc::new(KeyRing::new(&NEW, &[])));
-        assert_eq!(rotated.get("secret/a").await.unwrap().unwrap().value, b"alpha");
+        assert_eq!(
+            rotated.get("secret/a").await.unwrap().unwrap().value,
+            b"alpha"
+        );
     }
 
     #[tokio::test]
@@ -269,7 +278,10 @@ mod tests {
         barrier.put("secret/a", entry(b"alpha")).await.unwrap();
 
         let first = barrier.rewrap_all().await.unwrap();
-        assert_eq!(first.unchanged, 1, "a fresh write is already on the active key");
+        assert_eq!(
+            first.unchanged, 1,
+            "a fresh write is already on the active key"
+        );
 
         let second = barrier.rewrap_all().await.unwrap();
         assert_eq!((second.rewrapped, second.unchanged), (0, 1));
@@ -290,8 +302,14 @@ mod tests {
 
         let report = barrier.rewrap_all().await.unwrap();
         assert_eq!(report.failed, 1, "the orphan should be reported");
-        assert_eq!(report.unchanged, 1, "the healthy value should still be seen");
-        assert_eq!(barrier.get("secret/fine").await.unwrap().unwrap().value, b"kept");
+        assert_eq!(
+            report.unchanged, 1,
+            "the healthy value should still be seen"
+        );
+        assert_eq!(
+            barrier.get("secret/fine").await.unwrap().unwrap().value,
+            b"kept"
+        );
     }
 
     /// The race rewrap has to survive: a write lands between our read and our

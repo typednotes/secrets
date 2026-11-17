@@ -117,13 +117,16 @@ impl SecretsEngine for KvEngine {
                 "Writes require the `create` capability, not `update` — `update` is \
                  never checked for this mount."
                     .to_string(),
-                "Deletion is a soft delete: earlier versions remain in storage."
-                    .to_string(),
+                "Deletion is a soft delete: earlier versions remain in storage.".to_string(),
             ],
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         let metadata = Self::load_metadata(storage, path)
             .await?
             .ok_or(EngineError::NotFound)?;
@@ -153,7 +156,9 @@ impl SecretsEngine for KvEngine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        let mut metadata = Self::load_metadata(storage, path).await?.unwrap_or_default();
+        let mut metadata = Self::load_metadata(storage, path)
+            .await?
+            .unwrap_or_default();
         let new_version = metadata.current_version + 1;
         let key = Self::data_key(path, new_version);
         let value = serde_json::to_vec(&data).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -249,8 +254,14 @@ mod tests {
     async fn write_bumps_version() {
         let storage = MemStorage::default();
         let engine = KvEngine::new();
-        engine.write(&storage, "app/db", json!({"v": 1})).await.unwrap();
-        engine.write(&storage, "app/db", json!({"v": 2})).await.unwrap();
+        engine
+            .write(&storage, "app/db", json!({"v": 1}))
+            .await
+            .unwrap();
+        engine
+            .write(&storage, "app/db", json!({"v": 2}))
+            .await
+            .unwrap();
         let result = engine.read(&storage, "app/db").await.unwrap();
         assert_eq!(result["data"]["v"], 2);
         assert_eq!(result["metadata"]["version"], 2);
@@ -260,7 +271,10 @@ mod tests {
     async fn soft_delete_hides_current_version() {
         let storage = MemStorage::default();
         let engine = KvEngine::new();
-        engine.write(&storage, "app/db", json!({"v": 1})).await.unwrap();
+        engine
+            .write(&storage, "app/db", json!({"v": 1}))
+            .await
+            .unwrap();
         engine.delete(&storage, "app/db").await.unwrap();
         assert!(matches!(
             engine.read(&storage, "app/db").await,

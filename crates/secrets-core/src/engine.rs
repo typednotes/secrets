@@ -196,7 +196,11 @@ impl GeneratedCredential {
 
 #[async_trait]
 pub trait SecretsEngine: Send + Sync {
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value>;
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value>;
     async fn write(
         &self,
         storage: &dyn StorageBackend,

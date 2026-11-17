@@ -42,7 +42,10 @@ pub fn evaluate(policies: &[Policy], path: &str, capability: Capability) -> bool
     policies.iter().any(|p| p.is_allowed(path, capability))
 }
 
-pub async fn store_policy(storage: &dyn StorageBackend, policy: &Policy) -> Result<(), StorageError> {
+pub async fn store_policy(
+    storage: &dyn StorageBackend,
+    policy: &Policy,
+) -> Result<(), StorageError> {
     let path = format!("{POLICY_PREFIX}{}", policy.name);
     let value = serde_json::to_vec(policy).map_err(|e| StorageError::Backend(e.to_string()))?;
     storage
@@ -126,7 +129,11 @@ mod tests {
     fn evaluate_across_multiple_policies() {
         let a = policy(vec![("secret/", vec![Capability::Read])]);
         let b = policy(vec![("sys/", vec![Capability::Sudo])]);
-        assert!(evaluate(&[a.clone(), b.clone()], "secret/foo", Capability::Read));
+        assert!(evaluate(
+            &[a.clone(), b.clone()],
+            "secret/foo",
+            Capability::Read
+        ));
         assert!(evaluate(&[a, b], "sys/policy", Capability::Sudo));
     }
 }

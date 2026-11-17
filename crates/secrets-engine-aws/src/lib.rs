@@ -188,17 +188,13 @@ impl AwsEngine {
             .duration_seconds(duration);
 
         if let Some(policy) = &role.session_policy {
-            request = request.policy(
-                serde_json::to_string(policy)
-                    .map_err(|e| EngineError::InvalidRequest(format!("bad session_policy: {e}")))?,
-            );
+            request = request
+                .policy(serde_json::to_string(policy).map_err(|e| {
+                    EngineError::InvalidRequest(format!("bad session_policy: {e}"))
+                })?);
         }
         for arn in &role.session_policy_arns {
-            request = request.policy_arns(
-                PolicyDescriptorType::builder()
-                    .arn(arn)
-                    .build(),
-            );
+            request = request.policy_arns(PolicyDescriptorType::builder().arn(arn).build());
         }
         if let Some(external_id) = &role.external_id {
             request = request.external_id(external_id);
@@ -395,7 +391,12 @@ fn validate_session_ttl(seconds: i64) -> EngineResult<i32> {
 /// IAM and STS both accept only `[\w+=,.@-]` and cap names at 64 characters, so
 /// a role name goes through unchanged only if it happens to be tame.
 fn unique_name(prefix: &str, role: &str, suffix_len: usize, max_len: usize) -> String {
-    let suffix: String = Uuid::new_v4().simple().to_string().chars().take(suffix_len).collect();
+    let suffix: String = Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(suffix_len)
+        .collect();
     let sanitized: String = role
         .chars()
         .map(|c| {
@@ -414,7 +415,9 @@ fn unique_name(prefix: &str, role: &str, suffix_len: usize, max_len: usize) -> S
 fn scope_description(role: &RoleConfig, principal: &str) -> Vec<String> {
     let mut scoped = vec![principal.to_string()];
     match &role.session_policy {
-        Some(_) => scoped.push("session_policy: applied (permissions are the intersection)".to_string()),
+        Some(_) => {
+            scoped.push("session_policy: applied (permissions are the intersection)".to_string())
+        }
         None if role.credential_type == CredentialType::AssumedRole => scoped
             .push("session_policy: NONE — the session has the role's full permissions".to_string()),
         None => {}
@@ -541,7 +544,11 @@ impl SecretsEngine for AwsEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -551,7 +558,9 @@ impl SecretsEngine for AwsEngine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        STORE.handle_write::<AwsConfig, RoleConfig>(storage, path, data).await
+        STORE
+            .handle_write::<AwsConfig, RoleConfig>(storage, path, data)
+            .await
     }
 
     async fn delete(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<()> {
@@ -683,7 +692,11 @@ mod tests {
         let user = unique_name("v", &long_role, 12, IAM_MAX_USER_NAME);
         let session = unique_name("s", &long_role, 8, STS_MAX_SESSION_NAME);
         assert!(user.len() <= IAM_MAX_USER_NAME, "{} chars", user.len());
-        assert!(session.len() <= STS_MAX_SESSION_NAME, "{} chars", session.len());
+        assert!(
+            session.len() <= STS_MAX_SESSION_NAME,
+            "{} chars",
+            session.len()
+        );
     }
 
     /// IAM rejects anything outside `[\w+=,.@-]`, so a role name containing a

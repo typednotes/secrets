@@ -65,17 +65,23 @@ impl PostgresEngine {
         if let Some(pool) = self.pools.read().await.get(db_name) {
             return Ok(pool.clone());
         }
-        let config = Self::load_config(storage, db_name)
-            .await?
-            .ok_or_else(|| EngineError::InvalidRequest(format!("unknown database config '{db_name}'")))?;
+        let config = Self::load_config(storage, db_name).await?.ok_or_else(|| {
+            EngineError::InvalidRequest(format!("unknown database config '{db_name}'"))
+        })?;
         let pool = PgPool::connect(&config.connection_url)
             .await
             .map_err(|e| EngineError::Other(e.to_string()))?;
-        self.pools.write().await.insert(db_name.to_string(), pool.clone());
+        self.pools
+            .write()
+            .await
+            .insert(db_name.to_string(), pool.clone());
         Ok(pool)
     }
 
-    async fn load_config(storage: &dyn StorageBackend, name: &str) -> EngineResult<Option<DbConfig>> {
+    async fn load_config(
+        storage: &dyn StorageBackend,
+        name: &str,
+    ) -> EngineResult<Option<DbConfig>> {
         let Some(entry) = storage.get(&format!("{CONFIG_PREFIX}{name}")).await? else {
             return Ok(None);
         };
@@ -84,7 +90,11 @@ impl PostgresEngine {
         ))
     }
 
-    async fn save_config(storage: &dyn StorageBackend, name: &str, config: &DbConfig) -> EngineResult<()> {
+    async fn save_config(
+        storage: &dyn StorageBackend,
+        name: &str,
+        config: &DbConfig,
+    ) -> EngineResult<()> {
         let value = serde_json::to_vec(config).map_err(|e| EngineError::Other(e.to_string()))?;
         storage
             .put(
@@ -98,7 +108,10 @@ impl PostgresEngine {
         Ok(())
     }
 
-    async fn load_role(storage: &dyn StorageBackend, name: &str) -> EngineResult<Option<RoleConfig>> {
+    async fn load_role(
+        storage: &dyn StorageBackend,
+        name: &str,
+    ) -> EngineResult<Option<RoleConfig>> {
         let Some(entry) = storage.get(&format!("{ROLE_PREFIX}{name}")).await? else {
             return Ok(None);
         };
@@ -107,7 +120,11 @@ impl PostgresEngine {
         ))
     }
 
-    async fn save_role(storage: &dyn StorageBackend, name: &str, role: &RoleConfig) -> EngineResult<()> {
+    async fn save_role(
+        storage: &dyn StorageBackend,
+        name: &str,
+        role: &RoleConfig,
+    ) -> EngineResult<()> {
         let value = serde_json::to_vec(role).map_err(|e| EngineError::Other(e.to_string()))?;
         storage
             .put(
@@ -144,7 +161,9 @@ fn generate_password() -> String {
 }
 
 fn render_template(template: &str, username: &str, password: &str) -> String {
-    template.replace("{{name}}", username).replace("{{password}}", password)
+    template
+        .replace("{{name}}", username)
+        .replace("{{password}}", password)
 }
 
 #[async_trait]
@@ -202,15 +221,20 @@ impl SecretsEngine for PostgresEngine {
                 "Generated usernames are restricted to [a-z0-9_] and passwords to hex, \
                  so template substitution cannot break out of the quotes in your SQL."
                     .to_string(),
-                "The reaper takes no distributed lock, so run one node."
-                    .to_string(),
+                "The reaper takes no distributed lock, so run one node.".to_string(),
             ],
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         if let Some(name) = path.strip_prefix("roles/") {
-            let role = Self::load_role(storage, name).await?.ok_or(EngineError::NotFound)?;
+            let role = Self::load_role(storage, name)
+                .await?
+                .ok_or(EngineError::NotFound)?;
             serde_json::to_value(role).map_err(|e| EngineError::Other(e.to_string()))
         } else {
             Err(EngineError::InvalidRequest("expected roles/{name}".into()))
@@ -224,15 +248,17 @@ impl SecretsEngine for PostgresEngine {
         data: serde_json::Value,
     ) -> EngineResult<()> {
         if let Some(name) = path.strip_prefix("config/") {
-            let config: DbConfig =
-                serde_json::from_value(data).map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
+            let config: DbConfig = serde_json::from_value(data)
+                .map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
             Self::save_config(storage, name, &config).await
         } else if let Some(name) = path.strip_prefix("roles/") {
-            let role: RoleConfig =
-                serde_json::from_value(data).map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
+            let role: RoleConfig = serde_json::from_value(data)
+                .map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
             Self::save_role(storage, name, &role).await
         } else {
-            Err(EngineError::InvalidRequest("expected config/{name} or roles/{name}".into()))
+            Err(EngineError::InvalidRequest(
+                "expected config/{name} or roles/{name}".into(),
+            ))
         }
     }
 
@@ -245,7 +271,9 @@ impl SecretsEngine for PostgresEngine {
             storage.delete(&format!("{ROLE_PREFIX}{name}")).await?;
             Ok(())
         } else {
-            Err(EngineError::InvalidRequest("expected config/{name} or roles/{name}".into()))
+            Err(EngineError::InvalidRequest(
+                "expected config/{name} or roles/{name}".into(),
+            ))
         }
     }
 
@@ -263,7 +291,9 @@ impl SecretsEngine for PostgresEngine {
                 .filter_map(|k| k.strip_prefix(CONFIG_PREFIX).map(|s| s.to_string()))
                 .collect())
         } else {
-            Err(EngineError::InvalidRequest("expected config/ or roles/ prefix".into()))
+            Err(EngineError::InvalidRequest(
+                "expected config/ or roles/ prefix".into(),
+            ))
         }
     }
 
@@ -272,7 +302,9 @@ impl SecretsEngine for PostgresEngine {
         storage: &dyn StorageBackend,
         role_name: &str,
     ) -> EngineResult<GeneratedCredential> {
-        let role = Self::load_role(storage, role_name).await?.ok_or(EngineError::NotFound)?;
+        let role = Self::load_role(storage, role_name)
+            .await?
+            .ok_or(EngineError::NotFound)?;
         let pool = self.pool_for(storage, &role.db_name).await?;
 
         let username = generate_username(role_name);
@@ -324,7 +356,9 @@ impl SecretsEngine for PostgresEngine {
             .as_str()
             .ok_or_else(|| EngineError::Other("lease missing 'username'".into()))?;
 
-        let role = Self::load_role(storage, role_name).await?.ok_or(EngineError::NotFound)?;
+        let role = Self::load_role(storage, role_name)
+            .await?
+            .ok_or(EngineError::NotFound)?;
         let pool = self.pool_for(storage, db_name).await?;
 
         for statement in &role.revocation_statements {
@@ -345,7 +379,11 @@ mod tests {
     #[test]
     fn generated_username_is_sql_identifier_safe() {
         let username = generate_username("app'; DROP TABLE users; --");
-        assert!(username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        assert!(
+            username
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        );
     }
 
     #[test]

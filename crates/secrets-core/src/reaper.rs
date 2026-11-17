@@ -51,7 +51,10 @@ pub async fn revoke_leases_for_token(
 /// Scans all leases once and revokes any that have expired. Returns the
 /// number successfully reaped; individual failures are logged and skipped
 /// (they'll be retried on the next pass).
-pub async fn reap_once(storage: &dyn StorageBackend, router: &Router) -> Result<usize, ReaperError> {
+pub async fn reap_once(
+    storage: &dyn StorageBackend,
+    router: &Router,
+) -> Result<usize, ReaperError> {
     let now = Utc::now();
     let mut reaped = 0;
     for lease in lease::list_expired_leases(storage, now).await? {
@@ -132,8 +135,8 @@ mod tests {
     use crate::storage::{StorageEntry, StorageResult};
     use async_trait::async_trait;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use uuid::Uuid;
 
     #[derive(Default)]
@@ -186,7 +189,11 @@ mod tests {
                 caveats: vec![],
             }
         }
-        async fn read(&self, _storage: &dyn StorageBackend, _path: &str) -> EngineResult<serde_json::Value> {
+        async fn read(
+            &self,
+            _storage: &dyn StorageBackend,
+            _path: &str,
+        ) -> EngineResult<serde_json::Value> {
             unimplemented!()
         }
         async fn write(
@@ -200,7 +207,11 @@ mod tests {
         async fn delete(&self, _storage: &dyn StorageBackend, _path: &str) -> EngineResult<()> {
             unimplemented!()
         }
-        async fn list(&self, _storage: &dyn StorageBackend, _prefix: &str) -> EngineResult<Vec<String>> {
+        async fn list(
+            &self,
+            _storage: &dyn StorageBackend,
+            _prefix: &str,
+        ) -> EngineResult<Vec<String>> {
             unimplemented!()
         }
         async fn revoke(&self, _storage: &dyn StorageBackend, _lease: &Lease) -> EngineResult<()> {
@@ -285,7 +296,10 @@ mod tests {
         let expired = lease("tok", Utc::now() - chrono::Duration::seconds(10));
         lease::store_lease(&storage, &expired).await.unwrap();
 
-        assert_eq!(reap_once_if_leader(&storage, &router).await.unwrap(), Some(1));
+        assert_eq!(
+            reap_once_if_leader(&storage, &router).await.unwrap(),
+            Some(1)
+        );
         assert_eq!(engine.revoked.load(Ordering::SeqCst), 1);
     }
 
@@ -322,7 +336,9 @@ mod tests {
         lease::store_lease(&storage, &mine).await.unwrap();
         lease::store_lease(&storage, &theirs).await.unwrap();
 
-        revoke_leases_for_token(&storage, &router, "tok-a").await.unwrap();
+        revoke_leases_for_token(&storage, &router, "tok-a")
+            .await
+            .unwrap();
 
         let remaining = lease::list_leases(&storage).await.unwrap();
         assert_eq!(remaining.len(), 1);

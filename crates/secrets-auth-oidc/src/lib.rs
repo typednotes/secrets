@@ -115,7 +115,8 @@ impl OidcAuthMethod {
     }
 
     async fn discovery_for(&self, config: &OidcConfig) -> AuthResult<Discovery> {
-        if let Some((fetched_at, discovery)) = self.discovery_cache.read().await.get(&config.issuer_url)
+        if let Some((fetched_at, discovery)) =
+            self.discovery_cache.read().await.get(&config.issuer_url)
             && fetched_at.elapsed() < DISCOVERY_CACHE_TTL
         {
             return Ok(Discovery {
@@ -162,10 +163,19 @@ impl OidcAuthMethod {
             .map_err(|e| AuthError::Other(e.to_string()))
     }
 
-    async fn decoding_key_for(&self, config: &OidcConfig, kid: &str) -> AuthResult<(DecodingKey, Algorithm)> {
+    async fn decoding_key_for(
+        &self,
+        config: &OidcConfig,
+        kid: &str,
+    ) -> AuthResult<(DecodingKey, Algorithm)> {
         let jwks_uri = self.discovery_for(config).await?.jwks_uri;
 
-        let cached = self.jwks_cache.read().await.get(&config.issuer_url).cloned();
+        let cached = self
+            .jwks_cache
+            .read()
+            .await
+            .get(&config.issuer_url)
+            .cloned();
         let needs_fetch = match &cached {
             Some((fetched_at, jwks)) => {
                 fetched_at.elapsed() >= JWKS_CACHE_TTL || jwks.find(kid).is_none()
@@ -184,16 +194,20 @@ impl OidcAuthMethod {
             cached.unwrap().1
         };
 
-        let jwk = jwks.find(kid).ok_or_else(|| AuthError::Other(format!("unknown signing key '{kid}'")))?;
+        let jwk = jwks
+            .find(kid)
+            .ok_or_else(|| AuthError::Other(format!("unknown signing key '{kid}'")))?;
         let algorithm = algorithm_for(jwk)?;
-        let decoding_key =
-            DecodingKey::from_jwk(jwk).map_err(|e| AuthError::Other(format!("invalid JWK: {e}")))?;
+        let decoding_key = DecodingKey::from_jwk(jwk)
+            .map_err(|e| AuthError::Other(format!("invalid JWK: {e}")))?;
         Ok((decoding_key, algorithm))
     }
 
     async fn verify_jwt(&self, config: &OidcConfig, token: &str) -> AuthResult<Value> {
         let header = decode_header(token).map_err(|e| AuthError::Other(e.to_string()))?;
-        let kid = header.kid.ok_or_else(|| AuthError::Other("jwt is missing a 'kid' header".into()))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| AuthError::Other("jwt is missing a 'kid' header".into()))?;
         let (decoding_key, algorithm) = self.decoding_key_for(config, &kid).await?;
 
         let mut validation = Validation::new(algorithm);
@@ -257,7 +271,10 @@ impl OidcAuthMethod {
             .ok_or_else(|| AuthError::Other("OIDC is not configured".into()))?;
 
         let state_path = format!("{STATE_PREFIX}{state}");
-        let entry = storage.get(&state_path).await?.ok_or(AuthError::InvalidCredentials)?;
+        let entry = storage
+            .get(&state_path)
+            .await?
+            .ok_or(AuthError::InvalidCredentials)?;
         storage.delete(&state_path).await?;
         let pending: PendingState =
             serde_json::from_slice(&entry.value).map_err(|e| AuthError::Other(e.to_string()))?;
@@ -293,7 +310,11 @@ impl OidcAuthMethod {
         Ok(outcome_from_claims(&claims, &config))
     }
 
-    async fn login_bearer_jwt(&self, storage: &dyn StorageBackend, jwt: String) -> AuthResult<AuthOutcome> {
+    async fn login_bearer_jwt(
+        &self,
+        storage: &dyn StorageBackend,
+        jwt: String,
+    ) -> AuthResult<AuthOutcome> {
         let config = Self::load_config(storage)
             .await?
             .ok_or_else(|| AuthError::Other("OIDC is not configured".into()))?;
@@ -304,15 +325,19 @@ impl OidcAuthMethod {
 
 #[async_trait]
 impl AuthMethod for OidcAuthMethod {
-    async fn login(&self, storage: &dyn StorageBackend, request: LoginRequest) -> AuthResult<AuthOutcome> {
+    async fn login(
+        &self,
+        storage: &dyn StorageBackend,
+        request: LoginRequest,
+    ) -> AuthResult<AuthOutcome> {
         match request {
             LoginRequest::OidcAuthCodeCallback { code, state } => {
                 self.login_auth_code(storage, code, state).await
             }
             LoginRequest::OidcBearerJwt { jwt } => self.login_bearer_jwt(storage, jwt).await,
-            LoginRequest::UserPass { .. } => {
-                Err(AuthError::InvalidRequest("expected an OIDC login request".into()))
-            }
+            LoginRequest::UserPass { .. } => Err(AuthError::InvalidRequest(
+                "expected an OIDC login request".into(),
+            )),
         }
     }
 }
@@ -341,7 +366,11 @@ fn outcome_from_claims(claims: &Value, config: &OidcConfig) -> AuthOutcome {
 
 fn policies_from_claims(claims: &Value, config: &OidcConfig) -> Vec<String> {
     let policies = match claims.get(&config.policy_claim) {
-        Some(Value::Array(values)) => values.iter().filter_map(Value::as_str).map(String::from).collect(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect(),
         Some(Value::String(s)) => s.split_whitespace().map(String::from).collect(),
         _ => Vec::new(),
     };

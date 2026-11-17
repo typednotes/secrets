@@ -263,7 +263,12 @@ impl SecretsEngine for FederationEngine {
                     "read",
                     "refuses, by design — see the role path above",
                 ),
-                PathDoc::new("federation/help", &["GET"], "authenticated", "this document"),
+                PathDoc::new(
+                    "federation/help",
+                    &["GET"],
+                    "authenticated",
+                    "this document",
+                ),
             ],
             docs_url: Some("docs/delegation/federation.md".to_string()),
             caveats: vec![
@@ -381,7 +386,10 @@ mod tests {
         let form = &value["exchange"]["form"];
         assert_eq!(form["Action"], "AssumeRoleWithWebIdentity");
         assert_eq!(form["WebIdentityToken"], TOKEN_PLACEHOLDER);
-        assert_eq!(value["exchange"]["url"], "https://sts.eu-west-3.amazonaws.com/");
+        assert_eq!(
+            value["exchange"]["url"],
+            "https://sts.eu-west-3.amazonaws.com/"
+        );
         // The defining property of shape E: nothing was issued.
         assert!(value["issued_credential"].is_null());
     }
@@ -410,7 +418,10 @@ mod tests {
             }),
             &role(),
         );
-        assert_eq!(impersonated["exchange"]["steps"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            impersonated["exchange"]["steps"].as_array().map(Vec::len),
+            Some(2)
+        );
     }
 
     #[test]
@@ -458,7 +469,8 @@ mod tests {
             async fn get(
                 &self,
                 _: &str,
-            ) -> secrets_core::storage::StorageResult<Option<secrets_core::storage::StorageEntry>> {
+            ) -> secrets_core::storage::StorageResult<Option<secrets_core::storage::StorageEntry>>
+            {
                 Ok(None)
             }
             async fn put(
@@ -475,9 +487,15 @@ mod tests {
                 Ok(vec![])
             }
         }
-        let err = engine.generate(&NoStorage, "report-service").await.unwrap_err();
+        let err = engine
+            .generate(&NoStorage, "report-service")
+            .await
+            .unwrap_err();
         let message = err.to_string();
-        assert!(message.contains("federation/roles/report-service"), "{message}");
+        assert!(
+            message.contains("federation/roles/report-service"),
+            "{message}"
+        );
         assert!(message.contains("nothing to lease"), "{message}");
     }
 

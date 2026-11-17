@@ -32,7 +32,10 @@ pub async fn store_lease(storage: &dyn StorageBackend, lease: &Lease) -> Result<
         .await
 }
 
-pub async fn get_lease(storage: &dyn StorageBackend, id: Uuid) -> Result<Option<Lease>, StorageError> {
+pub async fn get_lease(
+    storage: &dyn StorageBackend,
+    id: Uuid,
+) -> Result<Option<Lease>, StorageError> {
     let path = format!("{LEASE_PREFIX}{id}");
     let Some(entry) = storage.get(&path).await? else {
         return Ok(None);

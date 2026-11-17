@@ -42,7 +42,10 @@ pub fn router(state: Arc<AppState>) -> AxumRouter {
             get(secret_read).post(secret_write).delete(secret_delete),
         )
         .route("/v1/secret/metadata/{*path}", get(secret_list))
-        .route("/v1/sys/leases/revoke/{lease_id}", post(revoke_lease_handler))
+        .route(
+            "/v1/sys/leases/revoke/{lease_id}",
+            post(revoke_lease_handler),
+        )
         // Self-documentation. Generic over the mount so every engine — the
         // ones here today and the ones added later — is discoverable and
         // describable without touching this file again.
@@ -57,7 +60,9 @@ pub fn router(state: Arc<AppState>) -> AxumRouter {
         )
         .route(
             "/v1/{mount}/roles/{role}",
-            get(engine_role_read).post(engine_role_write).delete(engine_role_delete),
+            get(engine_role_read)
+                .post(engine_role_write)
+                .delete(engine_role_delete),
         )
         .route("/v1/{mount}/creds/{role}", get(engine_generate_creds))
         .layer(tower_http::trace::TraceLayer::new_for_http())
@@ -78,8 +83,12 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
 // Err is a ready-to-send Response (large), by design: callers just `?`
 // it straight back out of the handler.
 #[allow(clippy::result_large_err)]
-async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<(String, TokenEntry), Response> {
-    let token = bearer_token(headers).ok_or_else(|| err(StatusCode::UNAUTHORIZED, "missing bearer token"))?;
+async fn authenticate(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(String, TokenEntry), Response> {
+    let token = bearer_token(headers)
+        .ok_or_else(|| err(StatusCode::UNAUTHORIZED, "missing bearer token"))?;
     let entry = token::lookup_token(state.storage.as_ref(), token)
         .await
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -171,7 +180,9 @@ async fn write_user(
     Path(username): Path<String>,
     body: Result<Json<WriteUserRequest>, JsonRejection>,
 ) -> Response {
-    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+    if let Err(resp) =
+        require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await
+    {
         return resp;
     }
     let Json(body) = match body {
@@ -197,7 +208,9 @@ async fn read_user(
     headers: HeaderMap,
     Path(username): Path<String>,
 ) -> Response {
-    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+    if let Err(resp) =
+        require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await
+    {
         return resp;
     }
     match secrets_auth_userpass::UserPassAuth::read_user(state.storage.as_ref(), &username).await {
@@ -216,10 +229,13 @@ async fn delete_user(
     headers: HeaderMap,
     Path(username): Path<String>,
 ) -> Response {
-    if let Err(resp) = require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await {
+    if let Err(resp) =
+        require_capability(&state, &headers, &user_path(&username), Capability::Sudo).await
+    {
         return resp;
     }
-    match secrets_auth_userpass::UserPassAuth::delete_user(state.storage.as_ref(), &username).await {
+    match secrets_auth_userpass::UserPassAuth::delete_user(state.storage.as_ref(), &username).await
+    {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => err(StatusCode::NOT_FOUND, "user not found"),
         Err(e) => auth_error_response(e),
@@ -251,7 +267,9 @@ async fn oidc_config_write(
     headers: HeaderMap,
     Json(config): Json<OidcConfig>,
 ) -> Response {
-    if let Err(resp) = require_capability(&state, &headers, "auth/oidc/config", Capability::Sudo).await {
+    if let Err(resp) =
+        require_capability(&state, &headers, "auth/oidc/config", Capability::Sudo).await
+    {
         return resp;
     }
     match secrets_auth_oidc::OidcAuthMethod::save_config(state.storage.as_ref(), &config).await {
@@ -305,7 +323,10 @@ async fn oidc_bearer_login(
 ) -> Response {
     let outcome = match state
         .oidc
-        .login(state.storage.as_ref(), LoginRequest::OidcBearerJwt { jwt: body.jwt })
+        .login(
+            state.storage.as_ref(),
+            LoginRequest::OidcBearerJwt { jwt: body.jwt },
+        )
         .await
     {
         Ok(outcome) => outcome,
@@ -350,9 +371,12 @@ async fn revoke_self(State(state): State<Arc<AppState>>, headers: HeaderMap) -> 
         return StatusCode::NO_CONTENT.into_response();
     };
 
-    if let Err(e) =
-        secrets_core::reaper::revoke_leases_for_token(state.storage.as_ref(), &state.router, &entry.id_hash)
-            .await
+    if let Err(e) = secrets_core::reaper::revoke_leases_for_token(
+        state.storage.as_ref(),
+        &state.router,
+        &entry.id_hash,
+    )
+    .await
     {
         return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
     }
@@ -468,7 +492,11 @@ async fn secret_write(
     let Some((mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    match mount.engine.write(state.storage.as_ref(), remainder, data).await {
+    match mount
+        .engine
+        .write(state.storage.as_ref(), remainder, data)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => engine_error_response(e, "secret"),
     }
@@ -540,7 +568,10 @@ async fn rewrap(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Respo
             let complete = report.failed == 0;
             let mut body = serde_json::to_value(&report).unwrap_or_else(|_| json!({}));
             if let Some(object) = body.as_object_mut() {
-                object.insert("active_key_id".to_string(), json!(state.rotation.active_key_id()));
+                object.insert(
+                    "active_key_id".to_string(),
+                    json!(state.rotation.active_key_id()),
+                );
                 object.insert(
                     "next_step".to_string(),
                     json!(if complete {
@@ -570,7 +601,10 @@ async fn engine_help(
         return resp;
     }
     let Some((engine_mount, _)) = state.router.resolve(&format!("{mount}/help")) else {
-        return err(StatusCode::NOT_FOUND, format!("no engine mounted at '{mount}/'"));
+        return err(
+            StatusCode::NOT_FOUND,
+            format!("no engine mounted at '{mount}/'"),
+        );
     };
     let doc = engine_mount.engine.doc();
     let mut value = serde_json::to_value(&doc).unwrap_or_else(|_| json!({}));
@@ -599,7 +633,12 @@ async fn sys_help(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Res
 
     let mut by_mount = std::collections::BTreeMap::new();
     for mount in state.router.mounts() {
-        let root = mount.prefix.split('/').next().unwrap_or(&mount.prefix).to_string();
+        let root = mount
+            .prefix
+            .split('/')
+            .next()
+            .unwrap_or(&mount.prefix)
+            .to_string();
         by_mount.entry(root).or_insert_with(|| mount.engine.doc());
     }
 
@@ -662,7 +701,11 @@ async fn engine_write_at(
     let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    match engine_mount.engine.write(state.storage.as_ref(), remainder, data).await {
+    match engine_mount
+        .engine
+        .write(state.storage.as_ref(), remainder, data)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => engine_error_response(e, mount),
     }
@@ -682,7 +725,11 @@ async fn engine_read_at(
     let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    match engine_mount.engine.read(state.storage.as_ref(), remainder).await {
+    match engine_mount
+        .engine
+        .read(state.storage.as_ref(), remainder)
+        .await
+    {
         Ok(value) => Json(value).into_response(),
         Err(e) => engine_error_response(e, mount),
     }
@@ -701,7 +748,11 @@ async fn engine_delete_at(
     let Some((engine_mount, remainder)) = state.router.resolve(&full_path) else {
         return err(StatusCode::NOT_FOUND, "no engine mounted at this path");
     };
-    match engine_mount.engine.delete(state.storage.as_ref(), remainder).await {
+    match engine_mount
+        .engine
+        .delete(state.storage.as_ref(), remainder)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => engine_error_response(e, mount),
     }
@@ -809,7 +860,11 @@ async fn engine_generate_creds(
         scoped_to,
         shape,
         revoke_effect,
-    } = match engine_mount.engine.generate(state.storage.as_ref(), remainder).await {
+    } = match engine_mount
+        .engine
+        .generate(state.storage.as_ref(), remainder)
+        .await
+    {
         Ok(generated) => generated,
         Err(e) => return engine_error_response(e, &mount),
     };
@@ -847,7 +902,9 @@ async fn revoke_lease_handler(
     headers: HeaderMap,
     Path(lease_id): Path<String>,
 ) -> Response {
-    if let Err(resp) = require_capability(&state, &headers, "sys/leases/revoke", Capability::Sudo).await {
+    if let Err(resp) =
+        require_capability(&state, &headers, "sys/leases/revoke", Capability::Sudo).await
+    {
         return resp;
     }
     let Ok(lease_id) = Uuid::parse_str(&lease_id) else {
@@ -859,7 +916,9 @@ async fn revoke_lease_handler(
     }) else {
         return err(StatusCode::NOT_FOUND, "lease not found");
     };
-    match secrets_core::reaper::revoke_lease(state.storage.as_ref(), &state.router, &target_lease).await {
+    match secrets_core::reaper::revoke_lease(state.storage.as_ref(), &state.router, &target_lease)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
@@ -922,7 +981,9 @@ mod tests {
             Err(secrets_core::storage::StorageError::Backend("down".into()))
         }
         async fn ping(&self) -> StorageResult<()> {
-            Err(secrets_core::storage::StorageError::Backend("connection refused".into()))
+            Err(secrets_core::storage::StorageError::Backend(
+                "connection refused".into(),
+            ))
         }
     }
 
@@ -973,7 +1034,11 @@ mod tests {
         // Freshly written through the barrier, so already on the active key.
         assert_eq!(body["rewrapped"], 0);
         assert_eq!(body["failed"], 0);
-        assert!(body["active_key_id"].as_str().is_some_and(|id| id.len() == 8));
+        assert!(
+            body["active_key_id"]
+                .as_str()
+                .is_some_and(|id| id.len() == 8)
+        );
         assert!(body["next_step"].as_str().unwrap().contains("retired keys"));
     }
 
@@ -992,7 +1057,12 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         let body = body_json(response).await;
         assert_eq!(body["status"], "error");
-        assert!(body["detail"].as_str().unwrap().contains("connection refused"));
+        assert!(
+            body["detail"]
+                .as_str()
+                .unwrap()
+                .contains("connection refused")
+        );
     }
 
     fn test_state() -> Arc<AppState> {
@@ -1035,7 +1105,10 @@ mod tests {
             let at = &mount.prefix;
             assert!(!doc.provider.is_empty(), "{at} has no provider");
             assert!(!doc.mechanism.is_empty(), "{at} has no mechanism");
-            assert!(!doc.scoping.is_empty(), "{at} does not describe its scoping");
+            assert!(
+                !doc.scoping.is_empty(),
+                "{at} does not describe its scoping"
+            );
             assert!(
                 !doc.root_credential.is_empty(),
                 "{at} does not say what secret the server must hold"
@@ -1104,10 +1177,21 @@ mod tests {
             .filter_map(|e| e["mount"].as_str())
             .collect();
         for expected in [
-            "aws", "database", "dropbox", "federation", "gcp", "github", "gitlab",
-            "gworkspace", "m365", "secret",
+            "aws",
+            "database",
+            "dropbox",
+            "federation",
+            "gcp",
+            "github",
+            "gitlab",
+            "gworkspace",
+            "m365",
+            "secret",
         ] {
-            assert!(mounts.contains(&expected), "{expected} missing from {mounts:?}");
+            assert!(
+                mounts.contains(&expected),
+                "{expected} missing from {mounts:?}"
+            );
         }
         // The API explains its own vocabulary, so a caller never has to guess
         // what "mint-expiry-only" is promising.
@@ -1124,18 +1208,23 @@ mod tests {
         // The token carries a policy name that does not exist, so it has no
         // capabilities at all — and must still be able to read the docs.
         let headers = authenticated(&state).await;
-        let response = engine_help(
-            State(state.clone()),
-            headers,
-            Path("github".to_string()),
-        )
-        .await;
+        let response = engine_help(State(state.clone()), headers, Path("github".to_string())).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
         assert_eq!(body["mount"], "github");
         assert_eq!(body["shape"], "mint-and-revoke");
-        assert!(body["revoke_effect"].as_str().unwrap().contains("installation/token"));
-        assert!(body["lease_semantics"].as_str().unwrap().contains("destroys"));
+        assert!(
+            body["revoke_effect"]
+                .as_str()
+                .unwrap()
+                .contains("installation/token")
+        );
+        assert!(
+            body["lease_semantics"]
+                .as_str()
+                .unwrap()
+                .contains("destroys")
+        );
     }
 
     /// The engines that cannot revoke must say so at the point a caller looks,
@@ -1164,12 +1253,14 @@ mod tests {
     async fn help_for_an_unmounted_engine_is_not_found() {
         let state = test_state();
         let headers = authenticated(&state).await;
-        let response =
-            engine_help(State(state.clone()), headers, Path("nope".to_string())).await;
+        let response = engine_help(State(state.clone()), headers, Path("nope".to_string())).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    fn user_body(password: &str, policies: &[&str]) -> Result<Json<WriteUserRequest>, JsonRejection> {
+    fn user_body(
+        password: &str,
+        policies: &[&str],
+    ) -> Result<Json<WriteUserRequest>, JsonRejection> {
         Ok(Json(WriteUserRequest {
             password: password.to_string(),
             policies: policies.iter().map(|p| p.to_string()).collect(),
@@ -1194,7 +1285,10 @@ mod tests {
         let response = read_user(State(state.clone()), headers.clone(), name()).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response).await;
-        assert_eq!(body, json!({ "username": "svc", "policies": ["svc-policy"] }));
+        assert_eq!(
+            body,
+            json!({ "username": "svc", "policies": ["svc-policy"] })
+        );
 
         let response = delete_user(State(state.clone()), headers.clone(), name()).await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -1212,7 +1306,13 @@ mod tests {
         let no_caps = authenticated(&state).await;
         let name = || Path("svc".to_string());
 
-        let write = write_user(State(state.clone()), no_caps.clone(), name(), user_body("x", &[])).await;
+        let write = write_user(
+            State(state.clone()),
+            no_caps.clone(),
+            name(),
+            user_body("x", &[]),
+        )
+        .await;
         assert_eq!(write.status(), StatusCode::FORBIDDEN);
         let read = read_user(State(state.clone()), no_caps.clone(), name()).await;
         assert_eq!(read.status(), StatusCode::FORBIDDEN);
@@ -1257,7 +1357,11 @@ mod tests {
                 user_body(password, &policies),
             )
             .await;
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{username}/{password}");
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{username}/{password}"
+            );
             assert!(body_json(response).await["error"].is_string());
         }
     }

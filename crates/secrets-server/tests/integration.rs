@@ -18,8 +18,8 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::{Client, Response, StatusCode};
+use serde_json::{Value, json};
 use tokio::sync::{OnceCell, Semaphore};
-use serde_json::{json, Value};
 use uuid::Uuid;
 
 const URL_ENV: &str = "SECRETS_TEST_URL";
@@ -56,7 +56,10 @@ struct Server {
 
 impl Server {
     fn from_env() -> Option<Self> {
-        let base = std::env::var(URL_ENV).ok()?.trim_end_matches('/').to_string();
+        let base = std::env::var(URL_ENV)
+            .ok()?
+            .trim_end_matches('/')
+            .to_string();
         let client = Client::builder().timeout(REQUEST_TIMEOUT).build().unwrap();
         Some(Self { client, base })
     }
@@ -262,7 +265,11 @@ async fn login_with_malformed_body_is_client_error() {
 async fn login_with_missing_fields_is_client_error() {
     let server = server!();
     let (status, _) = server
-        .post("/v1/auth/userpass/login", None, &json!({ "username": "admin" }))
+        .post(
+            "/v1/auth/userpass/login",
+            None,
+            &json!({ "username": "admin" }),
+        )
         .await;
     assert!(
         status.is_client_error(),
@@ -278,10 +285,14 @@ async fn oidc_authorize_url_responds_without_server_error() {
     let (status, body) = server.get("/v1/auth/oidc/authorize_url", None).await;
     match status {
         StatusCode::OK => assert!(
-            body["authorize_url"].as_str().is_some_and(|u| u.starts_with("http")),
+            body["authorize_url"]
+                .as_str()
+                .is_some_and(|u| u.starts_with("http")),
             "expected an absolute authorize_url: {body}"
         ),
-        StatusCode::BAD_REQUEST => assert!(body["error"].is_string(), "expected an error body: {body}"),
+        StatusCode::BAD_REQUEST => {
+            assert!(body["error"].is_string(), "expected an error body: {body}")
+        }
         other => panic!("unexpected status {other}: {body}"),
     }
 }
@@ -331,7 +342,10 @@ async fn login_issues_an_opaque_token_with_policies() {
         "token carries no policies: {body}"
     );
     assert_eq!(auth["display_name"], username);
-    assert!(auth["lease_duration"].as_i64().is_some_and(|d| d > 0), "{body}");
+    assert!(
+        auth["lease_duration"].as_i64().is_some_and(|d| d > 0),
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -352,10 +366,16 @@ async fn lookup_self_reports_token_metadata() {
     let (server, token) = authed_server!();
     let (status, body) = server.get("/v1/auth/token/lookup-self", Some(token)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["policies"].as_array().is_some_and(|p| !p.is_empty()), "{body}");
+    assert!(
+        body["policies"].as_array().is_some_and(|p| !p.is_empty()),
+        "{body}"
+    );
     let created_at = parse_time(&body["created_at"]);
     let expires_at = parse_time(&body["expires_at"]);
-    assert!(expires_at > created_at, "token expires before it was created: {body}");
+    assert!(
+        expires_at > created_at,
+        "token expires before it was created: {body}"
+    );
 }
 
 #[tokio::test]
@@ -363,7 +383,9 @@ async fn renew_self_pushes_out_the_expiry() {
     let (server, token) = authed_server!();
     let (_, before) = server.get("/v1/auth/token/lookup-self", Some(token)).await;
 
-    let (status, renewed) = server.post("/v1/auth/token/renew-self", Some(token), &json!({})).await;
+    let (status, renewed) = server
+        .post("/v1/auth/token/renew-self", Some(token), &json!({}))
+        .await;
     assert_eq!(status, StatusCode::OK, "{renewed}");
     assert!(
         parse_time(&renewed["expires_at"]) >= parse_time(&before["expires_at"]),
@@ -377,7 +399,9 @@ async fn renew_self_pushes_out_the_expiry() {
 #[tokio::test]
 async fn renew_self_without_token_is_unauthorized() {
     let server = server!();
-    let (status, _) = server.post("/v1/auth/token/renew-self", None, &json!({})).await;
+    let (status, _) = server
+        .post("/v1/auth/token/renew-self", None, &json!({}))
+        .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -391,11 +415,19 @@ async fn revoke_self_invalidates_the_token() {
     };
     let doomed = server.login(&username, &password).await;
 
-    let (status, _) = server.post("/v1/auth/token/revoke-self", Some(&doomed), &json!({})).await;
+    let (status, _) = server
+        .post("/v1/auth/token/revoke-self", Some(&doomed), &json!({}))
+        .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (status, body) = server.get("/v1/auth/token/lookup-self", Some(&doomed)).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "revoked token still works: {body}");
+    let (status, body) = server
+        .get("/v1/auth/token/lookup-self", Some(&doomed))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "revoked token still works: {body}"
+    );
 }
 
 #[tokio::test]
@@ -429,7 +461,11 @@ async fn kv_write_read_delete_round_trip() {
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     let (status, body) = server.get(&data_url(&path), Some(token)).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "deleted secret is still readable: {body}");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "deleted secret is still readable: {body}"
+    );
 }
 
 #[tokio::test]
@@ -455,7 +491,9 @@ async fn kv_rewrite_bumps_the_version_and_returns_the_latest() {
 #[tokio::test]
 async fn kv_read_of_unwritten_path_is_not_found() {
     let (server, token) = authed_server!();
-    let (status, _) = server.get(&data_url(&scratch_path("absent")), Some(token)).await;
+    let (status, _) = server
+        .get(&data_url(&scratch_path("absent")), Some(token))
+        .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
@@ -492,7 +530,10 @@ async fn kv_metadata_lists_keys_under_a_prefix() {
         .filter_map(Value::as_str)
         .collect();
     for path in &paths {
-        assert!(keys.contains(&path.as_str()), "{path} missing from {keys:?}");
+        assert!(
+            keys.contains(&path.as_str()),
+            "{path} missing from {keys:?}"
+        );
     }
 
     for path in &paths {
@@ -591,23 +632,34 @@ async fn policy_name_comes_from_the_path_not_the_body() {
         )
         .await;
 
-    let (status, body) = server.get(&format!("/v1/sys/policy/{name}"), Some(token)).await;
+    let (status, body) = server
+        .get(&format!("/v1/sys/policy/{name}"), Some(token))
+        .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["name"], name);
 
     let (status, _) = server
         .get(&format!("/v1/sys/policy/{impostor}"), Some(token))
         .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "policy leaked under the body's name");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "policy leaked under the body's name"
+    );
 
-    server.delete(&format!("/v1/sys/policy/{name}"), Some(token)).await;
+    server
+        .delete(&format!("/v1/sys/policy/{name}"), Some(token))
+        .await;
 }
 
 #[tokio::test]
 async fn policy_read_of_unknown_name_is_not_found() {
     let (server, token) = authed_server!();
     let (status, _) = server
-        .get(&format!("/v1/sys/policy/itest-{}", Uuid::new_v4()), Some(token))
+        .get(
+            &format!("/v1/sys/policy/itest-{}", Uuid::new_v4()),
+            Some(token),
+        )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -717,7 +769,9 @@ async fn created_user_logs_in_with_exactly_its_scoped_policies() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     server.delete(&data_url(&allowed), Some(&token)).await;
-    server.post("/v1/auth/token/revoke-self", Some(&token), &json!({})).await;
+    server
+        .post("/v1/auth/token/revoke-self", Some(&token), &json!({}))
+        .await;
     user.cleanup(&server, admin).await;
 }
 
@@ -733,7 +787,10 @@ async fn reading_a_user_returns_its_policies_and_never_the_hash() {
         json!({ "username": user.username, "policies": [user.policy] })
     );
     let raw = body.to_string();
-    assert!(!raw.contains("hash") && !raw.contains("argon2"), "leaked: {raw}");
+    assert!(
+        !raw.contains("hash") && !raw.contains("argon2"),
+        "leaked: {raw}"
+    );
     assert!(!raw.contains(&user.password), "leaked the password: {raw}");
 
     user.cleanup(&server, admin).await;
@@ -757,12 +814,18 @@ async fn replacing_a_user_changes_its_password_and_policies() {
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
 
     let (status, _) = user.login(&server, &user.password).await;
-    assert_eq!(status, StatusCode::UNAUTHORIZED, "the old password still works");
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "the old password still works"
+    );
     let (status, body) = user.login(&server, &new_password).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["auth"]["policies"], json!([]));
     let token = body["auth"]["client_token"].as_str().unwrap();
-    server.post("/v1/auth/token/revoke-self", Some(token), &json!({})).await;
+    server
+        .post("/v1/auth/token/revoke-self", Some(token), &json!({}))
+        .await;
 
     user.cleanup(&server, admin).await;
 }
@@ -814,7 +877,9 @@ async fn user_endpoints_require_sudo() {
     let (status, _) = server.get(&user.url(), Some("s.0000deadbeef")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    server.post("/v1/auth/token/revoke-self", Some(&token), &json!({})).await;
+    server
+        .post("/v1/auth/token/revoke-self", Some(&token), &json!({}))
+        .await;
     user.cleanup(&server, admin).await;
 }
 
@@ -823,24 +888,54 @@ async fn invalid_user_writes_are_bad_requests() {
     let (server, admin) = authed_server!();
     let ok_name = format!("itest-{}", Uuid::new_v4());
     let cases = [
-        (format!(".itest-{}", Uuid::new_v4()), json!({ "password": "a long enough password", "policies": [] })),
-        (format!("itest-{}", "x".repeat(64)), json!({ "password": "a long enough password", "policies": [] })),
-        (ok_name.clone(), json!({ "password": "short", "policies": [] })),
-        (ok_name.clone(), json!({ "password": "a long enough password", "policies": [""] })),
-        (ok_name.clone(), json!({ "password": "a long enough password", "policies": "root" })),
-        (ok_name.clone(), json!({ "password": "a long enough password" })),
+        (
+            format!(".itest-{}", Uuid::new_v4()),
+            json!({ "password": "a long enough password", "policies": [] }),
+        ),
+        (
+            format!("itest-{}", "x".repeat(64)),
+            json!({ "password": "a long enough password", "policies": [] }),
+        ),
+        (
+            ok_name.clone(),
+            json!({ "password": "short", "policies": [] }),
+        ),
+        (
+            ok_name.clone(),
+            json!({ "password": "a long enough password", "policies": [""] }),
+        ),
+        (
+            ok_name.clone(),
+            json!({ "password": "a long enough password", "policies": "root" }),
+        ),
+        (
+            ok_name.clone(),
+            json!({ "password": "a long enough password" }),
+        ),
     ];
     for (username, body) in cases {
         let (status, response) = server
-            .post(&format!("/v1/auth/userpass/users/{username}"), Some(admin), &body)
+            .post(
+                &format!("/v1/auth/userpass/users/{username}"),
+                Some(admin),
+                &body,
+            )
             .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{username} {body}: {response}");
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{username} {body}: {response}"
+        );
         assert!(response["error"].is_string(), "{response}");
     }
     let (status, _) = server
         .get(&format!("/v1/auth/userpass/users/{ok_name}"), Some(admin))
         .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "an invalid write created the user");
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "an invalid write created the user"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -851,7 +946,10 @@ async fn invalid_user_writes_are_bad_requests() {
 async fn database_creds_for_unknown_role_is_not_found() {
     let (server, token) = authed_server!();
     let (status, body) = server
-        .get(&format!("/v1/database/creds/itest-{}", Uuid::new_v4()), Some(token))
+        .get(
+            &format!("/v1/database/creds/itest-{}", Uuid::new_v4()),
+            Some(token),
+        )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
 }
@@ -896,6 +994,9 @@ fn data_url(path: &str) -> String {
 }
 
 fn parse_time(value: &Value) -> chrono::DateTime<chrono::Utc> {
-    let raw = value.as_str().unwrap_or_else(|| panic!("expected a timestamp, got {value}"));
-    raw.parse().unwrap_or_else(|e| panic!("unparseable timestamp {raw}: {e}"))
+    let raw = value
+        .as_str()
+        .unwrap_or_else(|| panic!("expected a timestamp, got {value}"));
+    raw.parse()
+        .unwrap_or_else(|e| panic!("unparseable timestamp {raw}: {e}"))
 }

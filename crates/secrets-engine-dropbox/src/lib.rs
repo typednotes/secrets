@@ -225,7 +225,11 @@ impl SecretsEngine for DropboxEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -404,7 +408,8 @@ mod tests {
     /// confining the token, because assuming otherwise understates the risk.
     #[test]
     fn scope_description_warns_that_select_user_does_not_narrow() {
-        let scoped = DropboxEngine::scope_description(&role(&["files.content.read"], Some("dbmid:abc")));
+        let scoped =
+            DropboxEngine::scope_description(&role(&["files.content.read"], Some("dbmid:abc")));
         let acting = scoped
             .iter()
             .find(|s| s.starts_with("acting-as:"))
@@ -461,9 +466,10 @@ mod tests {
     /// not fail the exchange.
     #[test]
     fn token_response_parses_without_a_scope_field() {
-        let token: TokenResponse =
-            serde_json::from_str(r#"{"access_token":"sl.x","token_type":"bearer","expires_in":14400}"#)
-                .expect("should parse");
+        let token: TokenResponse = serde_json::from_str(
+            r#"{"access_token":"sl.x","token_type":"bearer","expires_in":14400}"#,
+        )
+        .expect("should parse");
         assert!(token.scope.is_none());
     }
 }

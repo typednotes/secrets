@@ -1,5 +1,5 @@
-use figment::providers::{Env, Format, Toml};
 use figment::Figment;
+use figment::providers::{Env, Format, Toml};
 use secrets_core::policy::PathRule;
 use serde::Deserialize;
 
@@ -136,7 +136,9 @@ impl Config {
             // Its policy is named after it, so it must not take over the
             // admin's, and must not be the admin (whose rights it would cut).
             if name == ROOT_POLICY_NAME || self.bootstrap_username.as_ref() == Some(name) {
-                anyhow::bail!("service identity '{name}' would replace the bootstrap admin or its root policy");
+                anyhow::bail!(
+                    "service identity '{name}' would replace the bootstrap admin or its root policy"
+                );
             }
         }
 
@@ -195,8 +197,14 @@ mod tests {
             assert_eq!(app.username, "typednotes-app");
             assert_eq!(app.password().unwrap(), "an app password long enough");
             assert_eq!(app.rules[0].prefix, "secret/data/thirdparty/");
-            assert_eq!(app.rules[0].capabilities, [Capability::Create, Capability::Delete]);
-            assert_eq!(liaison.rules[0].capabilities, [Capability::Read, Capability::Create]);
+            assert_eq!(
+                app.rules[0].capabilities,
+                [Capability::Create, Capability::Delete]
+            );
+            assert_eq!(
+                liaison.rules[0].capabilities,
+                [Capability::Read, Capability::Create]
+            );
             Ok(())
         });
     }
@@ -221,11 +229,26 @@ mod tests {
             jail.set_env("SHORT_PW", "tiny-pw-7");
             jail.set_env("GOOD_PW", "a password long enough");
             for (identities, expected) in [
-                (r#"[{username="svc", password_env="UNSET_PW", rules=[]}]"#, "UNSET_PW is not set"),
-                (r#"[{username="svc", password_env="SHORT_PW", rules=[]}]"#, "at least 12"),
-                (r#"[{username="a/b", password_env="GOOD_PW", rules=[]}]"#, "username"),
-                (r#"[{username="admin", password_env="GOOD_PW", rules=[]}]"#, "bootstrap admin"),
-                (r#"[{username="root", password_env="GOOD_PW", rules=[]}]"#, "root policy"),
+                (
+                    r#"[{username="svc", password_env="UNSET_PW", rules=[]}]"#,
+                    "UNSET_PW is not set",
+                ),
+                (
+                    r#"[{username="svc", password_env="SHORT_PW", rules=[]}]"#,
+                    "at least 12",
+                ),
+                (
+                    r#"[{username="a/b", password_env="GOOD_PW", rules=[]}]"#,
+                    "username",
+                ),
+                (
+                    r#"[{username="admin", password_env="GOOD_PW", rules=[]}]"#,
+                    "bootstrap admin",
+                ),
+                (
+                    r#"[{username="root", password_env="GOOD_PW", rules=[]}]"#,
+                    "root policy",
+                ),
                 (
                     r#"[{username="svc", password_env="GOOD_PW", rules=[]},
                         {username="svc", password_env="GOOD_PW", rules=[]}]"#,
@@ -235,7 +258,10 @@ mod tests {
                 jail.set_env("SECRETS_SERVER_SERVICE_IDENTITIES", identities);
                 let message = err(&Config::load().unwrap());
                 assert!(message.contains(expected), "{identities}: {message}");
-                assert!(!message.contains("tiny-pw-7"), "leaked the password: {message}");
+                assert!(
+                    !message.contains("tiny-pw-7"),
+                    "leaked the password: {message}"
+                );
             }
             Ok(())
         });

@@ -187,12 +187,7 @@ impl SecretsEngine for GithubEngine {
                     "read",
                     "mint a one-hour installation token and open a lease",
                 ),
-                PathDoc::new(
-                    "github/help",
-                    &["GET"],
-                    "authenticated",
-                    "this document",
-                ),
+                PathDoc::new("github/help", &["GET"], "authenticated", "this document"),
             ],
             docs_url: Some("docs/delegation/github.md".to_string()),
             caveats: vec![
@@ -213,7 +208,11 @@ impl SecretsEngine for GithubEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -223,7 +222,9 @@ impl SecretsEngine for GithubEngine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        STORE.handle_write::<GithubConfig, RoleConfig>(storage, path, data).await
+        STORE
+            .handle_write::<GithubConfig, RoleConfig>(storage, path, data)
+            .await
     }
 
     async fn delete(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<()> {
@@ -392,7 +393,10 @@ mod tests {
             claims.exp - claims.iat <= 600,
             "App JWT lifetime must stay within GitHub's 10-minute limit"
         );
-        assert!(claims.iat < now.timestamp(), "iat must be backdated for clock skew");
+        assert!(
+            claims.iat < now.timestamp(),
+            "iat must be backdated for clock skew"
+        );
     }
 
     #[test]

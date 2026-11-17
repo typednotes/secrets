@@ -129,13 +129,17 @@ impl GworkspaceEngine {
     }
 
     fn require_refresh_token(config: &GworkspaceConfig) -> EngineResult<&str> {
-        config.refresh_token.as_deref().filter(|t| !t.is_empty()).ok_or_else(|| {
-            EngineError::InvalidRequest(
-                "this gworkspace/config has no refresh_token. Complete the consent \
+        config
+            .refresh_token
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| {
+                EngineError::InvalidRequest(
+                    "this gworkspace/config has no refresh_token. Complete the consent \
                  flow once and POST the resulting refresh token to the config path."
-                    .into(),
-            )
-        })
+                        .into(),
+                )
+            })
     }
 
     fn service_account(config: &GworkspaceConfig) -> EngineResult<ServiceAccountKey> {
@@ -164,13 +168,17 @@ impl GworkspaceEngine {
         role: &RoleConfig,
         now: DateTime<Utc>,
     ) -> EngineResult<AssertionClaims> {
-        let subject = role.subject.as_deref().filter(|s| !s.is_empty()).ok_or_else(|| {
-            EngineError::InvalidRequest(
-                "domain_wide_delegation requires `subject`: the email address of the \
+        let subject = role
+            .subject
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                EngineError::InvalidRequest(
+                    "domain_wide_delegation requires `subject`: the email address of the \
                  user to impersonate"
-                    .into(),
-            )
-        })?;
+                        .into(),
+                )
+            })?;
         Ok(AssertionClaims {
             iss: service_account_email.to_string(),
             sub: subject.to_string(),
@@ -255,7 +263,8 @@ impl GworkspaceEngine {
     ) -> EngineResult<()> {
         let mut updated = config.clone();
         updated.refresh_token = Some(new_refresh_token.to_string());
-        let value = serde_json::to_value(&updated).map_err(|e| EngineError::Other(e.to_string()))?;
+        let value =
+            serde_json::to_value(&updated).map_err(|e| EngineError::Other(e.to_string()))?;
         STORE
             .handle_write::<GworkspaceConfig, RoleConfig>(
                 storage,
@@ -333,7 +342,12 @@ impl SecretsEngine for GworkspaceEngine {
                     "exchange the stored grant for a short-lived access token and \
                      open a lease",
                 ),
-                PathDoc::new("gworkspace/help", &["GET"], "authenticated", "this document"),
+                PathDoc::new(
+                    "gworkspace/help",
+                    &["GET"],
+                    "authenticated",
+                    "this document",
+                ),
             ],
             docs_url: Some("docs/delegation/google-workspace.md".to_string()),
             caveats: vec![
@@ -364,7 +378,11 @@ impl SecretsEngine for GworkspaceEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -411,11 +429,8 @@ impl SecretsEngine for GworkspaceEngine {
                 let key = Self::service_account(&config)?;
                 let claims = Self::assertion_claims(&key.client_email, &role, now)?;
                 let assertion = Self::sign_assertion(&key, &claims)?;
-                self.post_token_form(&[
-                    ("grant_type", JWT_BEARER_GRANT),
-                    ("assertion", &assertion),
-                ])
-                .await?
+                self.post_token_form(&[("grant_type", JWT_BEARER_GRANT), ("assertion", &assertion)])
+                    .await?
             }
         };
 
@@ -426,7 +441,9 @@ impl SecretsEngine for GworkspaceEngine {
             tracing::info!(target = %role.target, "stored a reissued Google refresh token");
         }
 
-        let ttl_seconds = token.expires_in.unwrap_or(FALLBACK_ACCESS_TOKEN_TTL_SECONDS);
+        let ttl_seconds = token
+            .expires_in
+            .unwrap_or(FALLBACK_ACCESS_TOKEN_TTL_SECONDS);
         let lease = Lease {
             id: Uuid::new_v4(),
             // Set by the HTTP handler, which knows the requesting token.
@@ -518,15 +535,25 @@ mod tests {
         // act as the user rather than as the service account.
         assert_eq!(claims.sub, "alice@acme.com");
         assert_eq!(claims.aud, TOKEN_ENDPOINT);
-        assert_eq!(claims.scope, "https://www.googleapis.com/auth/drive.readonly");
-        assert!(claims.exp - claims.iat <= 3600, "Google caps the assertion at one hour");
+        assert_eq!(
+            claims.scope,
+            "https://www.googleapis.com/auth/drive.readonly"
+        );
+        assert!(
+            claims.exp - claims.iat <= 3600,
+            "Google caps the assertion at one hour"
+        );
     }
 
     #[test]
     fn assertion_claims_join_multiple_scopes_with_spaces() {
         let claims = GworkspaceEngine::assertion_claims(
             "svc@acme.iam.gserviceaccount.com",
-            &role(Mode::DomainWideDelegation, Some("alice@acme.com"), &["a", "b"]),
+            &role(
+                Mode::DomainWideDelegation,
+                Some("alice@acme.com"),
+                &["a", "b"],
+            ),
             Utc::now(),
         )
         .expect("claims");
@@ -570,8 +597,8 @@ mod tests {
                 refresh_token: stored,
                 service_account_key_json: None,
             };
-            let err = GworkspaceEngine::require_refresh_token(&config)
-                .expect_err("must be refused");
+            let err =
+                GworkspaceEngine::require_refresh_token(&config).expect_err("must be refused");
             assert!(matches!(err, EngineError::InvalidRequest(_)), "got {err:?}");
         }
     }

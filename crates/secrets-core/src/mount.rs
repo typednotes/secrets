@@ -50,7 +50,9 @@ impl ConfigRoleStore {
         storage: &dyn StorageBackend,
         name: &str,
     ) -> EngineResult<R> {
-        self.load_role(storage, name).await?.ok_or(EngineError::NotFound)
+        self.load_role(storage, name)
+            .await?
+            .ok_or(EngineError::NotFound)
     }
 
     pub async fn require_config<C: DeserializeOwned>(
@@ -75,7 +77,10 @@ impl ConfigRoleStore {
             let role: R = self.require_role(storage, name).await?;
             serde_json::to_value(role).map_err(|e| EngineError::Other(e.to_string()))
         } else if let Some(name) = path.strip_prefix("config/") {
-            let exists = storage.get(&format!("{}{name}", self.config_prefix)).await?.is_some();
+            let exists = storage
+                .get(&format!("{}{name}", self.config_prefix))
+                .await?
+                .is_some();
             if exists {
                 Ok(json!({
                     "configured": true,
@@ -103,12 +108,12 @@ impl ConfigRoleStore {
         R: DeserializeOwned + Serialize,
     {
         if let Some(name) = path.strip_prefix("config/") {
-            let config: C =
-                serde_json::from_value(data).map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
+            let config: C = serde_json::from_value(data)
+                .map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
             save(storage, self.config_prefix, name, &config).await
         } else if let Some(name) = path.strip_prefix("roles/") {
-            let role: R =
-                serde_json::from_value(data).map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
+            let role: R = serde_json::from_value(data)
+                .map_err(|e| EngineError::InvalidRequest(e.to_string()))?;
             save(storage, self.role_prefix, name, &role).await
         } else {
             Err(EngineError::InvalidRequest(
@@ -123,10 +128,14 @@ impl ConfigRoleStore {
         path: &str,
     ) -> EngineResult<()> {
         if let Some(name) = path.strip_prefix("config/") {
-            storage.delete(&format!("{}{name}", self.config_prefix)).await?;
+            storage
+                .delete(&format!("{}{name}", self.config_prefix))
+                .await?;
             Ok(())
         } else if let Some(name) = path.strip_prefix("roles/") {
-            storage.delete(&format!("{}{name}", self.role_prefix)).await?;
+            storage
+                .delete(&format!("{}{name}", self.role_prefix))
+                .await?;
             Ok(())
         } else {
             Err(EngineError::InvalidRequest(

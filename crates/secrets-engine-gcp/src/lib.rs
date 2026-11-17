@@ -26,7 +26,8 @@ use uuid::Uuid;
 const STORE: ConfigRoleStore = ConfigRoleStore::new("gcp/config/", "gcp/roles/");
 const MOUNT: &str = "gcp/creds/";
 
-const METADATA_TOKEN_URL: &str = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
+const METADATA_TOKEN_URL: &str =
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
 const OAUTH_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const IAM_CREDENTIALS_URL: &str = "https://iamcredentials.googleapis.com/v1";
 const STS_URL: &str = "https://sts.googleapis.com/v1/token";
@@ -274,9 +275,11 @@ impl GcpEngine {
                             "metadata server unreachable — is this server running on GCP? {e}"
                         ))
                     })?;
-                Ok(Self::parse::<OauthTokenResponse>(response, "metadata server")
-                    .await?
-                    .access_token)
+                Ok(
+                    Self::parse::<OauthTokenResponse>(response, "metadata server")
+                        .await?
+                        .access_token,
+                )
             }
             GcpAuth::ServiceAccountKey => {
                 let raw = config.service_account_key_json.as_deref().ok_or_else(|| {
@@ -304,8 +307,8 @@ impl GcpEngine {
             iat: now,
             exp: now + ASSERTION_TTL_SECONDS,
         };
-        let encoding_key =
-            jsonwebtoken::EncodingKey::from_rsa_pem(key.private_key.as_bytes()).map_err(|e| {
+        let encoding_key = jsonwebtoken::EncodingKey::from_rsa_pem(key.private_key.as_bytes())
+            .map_err(|e| {
                 EngineError::InvalidRequest(format!(
                     "the private_key in service_account_key_json is not a valid RSA PEM: {e}"
                 ))
@@ -368,7 +371,10 @@ impl GcpEngine {
             .http
             .post(STS_URL)
             .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
+                (
+                    "grant_type",
+                    "urn:ietf:params:oauth:grant-type:token-exchange",
+                ),
                 (
                     "subject_token_type",
                     "urn:ietf:params:oauth:token-type:access_token",
@@ -524,7 +530,11 @@ impl SecretsEngine for GcpEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -534,7 +544,9 @@ impl SecretsEngine for GcpEngine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        STORE.handle_write::<GcpConfig, RoleConfig>(storage, path, data).await
+        STORE
+            .handle_write::<GcpConfig, RoleConfig>(storage, path, data)
+            .await
     }
 
     async fn delete(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<()> {
@@ -615,8 +627,7 @@ impl SecretsEngine for GcpEngine {
             expires_at,
         };
 
-        let credential =
-            GeneratedCredential::new(data, lease, Self::scope_description(&role));
+        let credential = GeneratedCredential::new(data, lease, Self::scope_description(&role));
         Ok(match Self::revocation_override(role.credential_type) {
             Some((shape, effect)) => credential.with_shape(shape, effect),
             None => credential,
@@ -624,7 +635,9 @@ impl SecretsEngine for GcpEngine {
     }
 
     async fn revoke(&self, storage: &dyn StorageBackend, lease: &Lease) -> EngineResult<()> {
-        let credential_type = lease.internal_data["credential_type"].as_str().unwrap_or("");
+        let credential_type = lease.internal_data["credential_type"]
+            .as_str()
+            .unwrap_or("");
         if credential_type != "hmac" {
             // Nothing to call. Google offers no way to invalidate an issued
             // access token, so the credential outlives this lease record and
@@ -661,7 +674,8 @@ impl SecretsEngine for GcpEngine {
             .send()
             .await
             .map_err(|e| EngineError::Provider(format!("HMAC deactivation failed: {e}")))?;
-        if !deactivated.status().is_success() && deactivated.status() != reqwest::StatusCode::NOT_FOUND
+        if !deactivated.status().is_success()
+            && deactivated.status() != reqwest::StatusCode::NOT_FOUND
         {
             return Err(EngineError::Provider(format!(
                 "Google returned {} when deactivating HMAC key {access_id}",
@@ -693,7 +707,11 @@ impl SecretsEngine for GcpEngine {
 mod tests {
     use super::*;
 
-    fn role(credential_type: CredentialType, bucket: Option<&str>, prefix: Option<&str>) -> RoleConfig {
+    fn role(
+        credential_type: CredentialType,
+        bucket: Option<&str>,
+        prefix: Option<&str>,
+    ) -> RoleConfig {
         RoleConfig {
             target: "production".to_string(),
             credential_type,
@@ -722,7 +740,10 @@ mod tests {
             rule["availableResource"],
             "//storage.googleapis.com/projects/_/buckets/reports"
         );
-        assert_eq!(rule["availablePermissions"][0], "inRole:roles/storage.objectViewer");
+        assert_eq!(
+            rule["availablePermissions"][0],
+            "inRole:roles/storage.objectViewer"
+        );
         assert!(
             rule.get("availabilityCondition").is_none(),
             "an unprefixed boundary should carry no condition"
@@ -744,7 +765,9 @@ mod tests {
             .as_str()
             .unwrap();
         assert!(
-            expression.contains("resource.name.startsWith('projects/_/buckets/reports/objects/report-service/')"),
+            expression.contains(
+                "resource.name.startsWith('projects/_/buckets/reports/objects/report-service/')"
+            ),
             "{expression}"
         );
         assert!(expression.contains("objectListPrefix"), "{expression}");
@@ -753,8 +776,8 @@ mod tests {
 
     #[test]
     fn downscoping_without_a_bucket_is_rejected() {
-        let err = GcpEngine::access_boundary(&role(CredentialType::Downscoped, None, None))
-            .unwrap_err();
+        let err =
+            GcpEngine::access_boundary(&role(CredentialType::Downscoped, None, None)).unwrap_err();
         assert!(matches!(err, EngineError::InvalidRequest(_)), "got {err:?}");
     }
 
@@ -788,7 +811,10 @@ mod tests {
             Some("report-service/"),
         ));
         assert!(scoped.contains(&"bucket:reports".to_string()), "{scoped:?}");
-        assert!(scoped.contains(&"prefix:report-service/".to_string()), "{scoped:?}");
+        assert!(
+            scoped.contains(&"prefix:report-service/".to_string()),
+            "{scoped:?}"
+        );
         assert!(
             scoped.contains(&"in_role:roles/storage.objectViewer".to_string()),
             "{scoped:?}"

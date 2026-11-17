@@ -259,7 +259,11 @@ impl SecretsEngine for GitlabEngine {
         }
     }
 
-    async fn read(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<serde_json::Value> {
+    async fn read(
+        &self,
+        storage: &dyn StorageBackend,
+        path: &str,
+    ) -> EngineResult<serde_json::Value> {
         STORE.handle_read::<RoleConfig>(storage, path).await
     }
 
@@ -269,7 +273,9 @@ impl SecretsEngine for GitlabEngine {
         path: &str,
         data: serde_json::Value,
     ) -> EngineResult<()> {
-        STORE.handle_write::<GitlabConfig, RoleConfig>(storage, path, data).await
+        STORE
+            .handle_write::<GitlabConfig, RoleConfig>(storage, path, data)
+            .await
     }
 
     async fn delete(&self, storage: &dyn StorageBackend, path: &str) -> EngineResult<()> {
@@ -496,7 +502,10 @@ mod tests {
     #[test]
     fn default_access_level_is_narrower_than_gitlabs() {
         assert_eq!(default_access_level(), 20);
-        assert_eq!(GitlabEngine::access_level_name(default_access_level()), "reporter");
+        assert_eq!(
+            GitlabEngine::access_level_name(default_access_level()),
+            "reporter"
+        );
     }
 
     #[test]
