@@ -47,7 +47,11 @@ Before declaring a change done, run type-check, tests and lint, and report their
 
 **Confirm explicitly every time**, even if a similar action was approved earlier — approval does
 not carry over to a new context:
-- `git push` of any kind; never force-push, and never push to `main`/`master` directly;
+- `git push` only when explicitly requested by the user for that operation. Direct pushes to
+  `main`/`master` are permitted only when explicitly specified. A request specifying the push
+  scope (repositories, remote, branches and any tags), including an explicit command or batch,
+  counts as confirmation; do not ask again for the same operation. Approval does not extend to
+  later pushes. Never force-push or rewrite pushed history;
 - opening, merging or closing a PR/MR, posting review comments, tagging, releasing, publishing a
   package or image;
 - deploying to any environment (dev, staging, prod);
